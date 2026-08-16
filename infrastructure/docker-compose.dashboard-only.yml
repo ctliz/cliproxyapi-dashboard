@@ -57,6 +57,7 @@ services:
       - ./.env
     volumes:
       - backup_data:/app/backups
+      - ${CLIPROXYAPI_CONFIG_DIR:-/Users/tsiji/.config/cliproxyapi}:/Users/tsiji/.config/cliproxyapi
     depends_on:
       postgres:
         condition: service_healthy
