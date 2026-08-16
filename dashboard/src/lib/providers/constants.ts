@@ -27,6 +27,7 @@ export const OAUTH_PROVIDER = {
   KILO: "kilo",
   GITLAB: "gitlab",
   QWEN: "qwen",
+  XAI: "xai",
 } as const;
 
 export type OAuthProvider = (typeof OAUTH_PROVIDER)[keyof typeof OAUTH_PROVIDER];
@@ -58,6 +59,7 @@ const OAUTH_PROVIDER_ALIASES: Record<string, OAuthProvider> = {
   kilo: OAUTH_PROVIDER.KILO,
   gitlab: OAUTH_PROVIDER.GITLAB,
   qwen: OAUTH_PROVIDER.QWEN,
+  xai: OAUTH_PROVIDER.XAI,
 };
 
 export function canonicalizeOAuthProvider(raw: string | null | undefined): OAuthProvider | null {
