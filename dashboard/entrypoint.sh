@@ -474,6 +474,68 @@ async function migrate() {
 
     console.log('[dashboard] Tables ready');
 
+    // Auto-sync policies on startup
+    try {
+      const prefsRes = await client.query('SELECT "excludedModels" FROM model_preferences');
+      const set = new Set();
+      for (const row of prefsRes.rows) {
+        if (Array.isArray(row.excludedModels)) {
+          for (const m of row.excludedModels) set.add(m);
+        }
+      }
+      const excluded = Array.from(set);
+      const fs = require('fs');
+      const configPath = process.env.CLIPROXYAPI_GLOBAL_MODEL_FILTER || '/Users/tsiji/.config/cliproxyapi/global-model-filter.json';
+      const filterPayload = {
+        enabled: excluded.length > 0,
+        global_excluded_models: excluded,
+        action: "reject",
+        fallback: {}
+      };
+      try {
+        fs.mkdirSync(require('path').dirname(configPath), { recursive: true });
+        fs.writeFileSync(configPath, JSON.stringify(filterPayload, null, 2), 'utf8');
+      } catch (fe) {
+        console.warn('[dashboard] Failed to write global-model-filter.json:', fe.message);
+      }
+
+      const baseUrl = process.env.CLIPROXYAPI_MANAGEMENT_URL || 'http://host.docker.internal:8317/v0/management';
+      const mgmtKey = process.env.MANAGEMENT_API_KEY;
+      if (mgmtKey) {
+        fetch(`${baseUrl}/global-model-filter/policy`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${mgmtKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(filterPayload)
+        }).catch(() => {});
+
+        const oauthMap = { antigravity: [], claude: [], codex: [], gemini: [], vertex: [], xai: [], kimi: [], kiro: [], iflow: [], copilot: [] };
+        for (const m of excluded) {
+          const lower = m.toLowerCase();
+          if (lower.startsWith('claude-')) oauthMap.claude.push(m);
+          else if (lower.startsWith('gpt-') || lower.startsWith('o1') || lower.startsWith('o3') || lower.startsWith('o4') || lower.startsWith('codex-') || lower.includes('codex') || lower.includes('gpt-oss') || lower.startsWith('gpt-image-')) oauthMap.codex.push(m);
+          else if (lower.startsWith('gemini-') || lower.startsWith('imagen-') || lower.includes('gemini')) {
+            oauthMap.antigravity.push(m); oauthMap.gemini.push(m); oauthMap.vertex.push(m);
+          } else if (lower.startsWith('grok-')) oauthMap.xai.push(m);
+          else if (lower.startsWith('kimi-')) oauthMap.kimi.push(m);
+          else if (lower.startsWith('kiro-') || lower.startsWith('amazonq-')) oauthMap.kiro.push(m);
+          else if (lower.startsWith('glm-') || lower.startsWith('iflow-') || lower.startsWith('minimax-') || lower.startsWith('tstars')) oauthMap.iflow.push(m);
+          else { oauthMap.antigravity.push(m); oauthMap.claude.push(m); oauthMap.codex.push(m); }
+        }
+        const cleanOauthMap = {};
+        for (const [k, v] of Object.entries(oauthMap)) {
+          if (v.length > 0) cleanOauthMap[k] = v;
+        }
+        fetch(`${baseUrl}/oauth-excluded-models`, {
+          method: 'PUT',
+          headers: { 'Authorization': `Bearer ${mgmtKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify(cleanOauthMap)
+        }).catch(() => {});
+      }
+      console.log('[dashboard] Startup policy sync completed (' + excluded.length + ' excluded models)');
+    } catch (pe) {
+      console.warn('[dashboard] Startup policy sync warning:', pe.message);
+    }
+
   } catch (e) {
     console.error('[dashboard] FATAL: DB migration failed:', e.message);
     failed = true;
