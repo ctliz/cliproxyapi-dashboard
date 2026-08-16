@@ -39,6 +39,34 @@ describe("Global Model Filter Sync", () => {
     delete process.env.CLIPROXYAPI_GLOBAL_MODEL_FILTER;
   });
 
+  it("maps excluded models to correct OAuth provider buckets", async () => {
+    const { mapExcludedModelsToOAuthProviders } = await import("../filter-sync");
+
+    const mapped = mapExcludedModelsToOAuthProviders(
+      [
+        "claude-opus-4-8",
+        "claude-fable-5",
+        "gpt-5.6-terra",
+        "codex-auto-review",
+        "gemini-3.7-flash-tiered",
+        "grok-3",
+        "kimi-k2",
+      ],
+      {
+        "gpt-5.6-terra": "openai",
+        "claude-opus-4-8": "anthropic",
+      }
+    );
+
+    expect(mapped.claude).toContain("claude-opus-4-8");
+    expect(mapped.claude).toContain("claude-fable-5");
+    expect(mapped.codex).toContain("gpt-5.6-terra");
+    expect(mapped.codex).toContain("codex-auto-review");
+    expect(mapped.antigravity).toContain("gemini-3.7-flash-tiered");
+    expect(mapped.xai).toContain("grok-3");
+    expect(mapped.kimi).toContain("kimi-k2");
+  });
+
   it("writes active global excluded models to JSON file when models are excluded", async () => {
     mockFindUnique.mockResolvedValue({
       excludedModels: ["gpt-3.5-turbo*", "claude-opus-4-8", "gemini-3.7-flash-tiered"],
