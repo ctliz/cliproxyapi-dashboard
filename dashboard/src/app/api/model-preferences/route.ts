@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { z } from "zod";
 import { ModelPreferencesSchema } from "@/lib/validation/schemas";
 import { Errors, apiSuccess } from "@/lib/errors";
+import { syncGlobalModelFilter } from "@/lib/model-filter/filter-sync";
 
 export async function GET() {
   try {
@@ -63,6 +64,9 @@ export async function PUT(request: NextRequest) {
         excludedModels: validated.excludedModels,
       },
     });
+
+    // Auto-sync global model filter rules
+    await syncGlobalModelFilter(session.userId);
 
     return apiSuccess({
       excludedModels: modelPreference.excludedModels,
