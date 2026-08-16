@@ -364,6 +364,9 @@ export default function ApiKeysPage() {
         onSaved={handlePolicySaved}
         availableModels={availableModels}
         providers={providers}
+        onRefreshModels={async () => {
+          await fetchModelsAndProviders();
+        }}
       />
 
       {/* ── Create Key Modal ── */}

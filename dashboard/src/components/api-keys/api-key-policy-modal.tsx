@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { Modal, ModalHeader, ModalTitle, ModalContent, ModalFooter } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { HelpTooltip } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { useTranslations } from "next-intl";
@@ -21,7 +20,7 @@ export interface ApiKeyItem {
   fallbackModel: string | null;
 }
 
-interface ProviderOption {
+export interface ProviderOption {
   id: string;
   name: string;
   models: string[];
@@ -40,6 +39,7 @@ interface ApiKeyPolicyModalProps {
   }) => void;
   availableModels: string[];
   providers: ProviderOption[];
+  onRefreshModels?: () => Promise<void>;
 }
 
 function ShieldIcon({ className }: { className?: string }) {
@@ -61,13 +61,33 @@ function ShieldIcon({ className }: { className?: string }) {
   );
 }
 
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+    </svg>
+  );
+}
+
 export function ApiKeyPolicyModal({
   isOpen,
   onClose,
   apiKey,
   onSaved,
-  availableModels,
-  providers,
+  availableModels: initialAvailableModels,
+  providers: initialProviders,
+  onRefreshModels,
 }: ApiKeyPolicyModalProps) {
   const t = useTranslations("apiKeys");
   const tc = useTranslations("common");
@@ -79,9 +99,35 @@ export function ApiKeyPolicyModal({
   const [fallbackModel, setFallbackModel] = useState("");
   const [customPattern, setCustomPattern] = useState("");
   const [saving, setSaving] = useState(false);
-  const [modelSearch, setModelSearch] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
 
-  // Sync internal state when opened
+  // Live state for models & providers
+  const [liveModels, setLiveModels] = useState<string[]>(initialAvailableModels);
+  const [liveProviders, setLiveProviders] = useState<ProviderOption[]>(initialProviders);
+  const [modelSearch, setModelSearch] = useState("");
+  const [selectedProviderFilter, setSelectedProviderFilter] = useState<string>("all");
+
+  const loadLiveModels = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const res = await fetch(API_ENDPOINTS.PROXY.MODELS, { cache: "no-store" });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models) && data.models.length > 0) {
+          setLiveModels(data.models);
+        }
+        if (Array.isArray(data.providers) && data.providers.length > 0) {
+          setLiveProviders(data.providers);
+        }
+      }
+    } catch {
+      // Fallback to initial
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  // Sync internal state and trigger live refresh when opened
   useEffect(() => {
     if (apiKey && isOpen) {
       setPolicyEnabled(Boolean(apiKey.policyEnabled));
@@ -90,8 +136,15 @@ export function ApiKeyPolicyModal({
       setFallbackModel(apiKey.fallbackModel || "");
       setCustomPattern("");
       setModelSearch("");
+      setSelectedProviderFilter("all");
+      void loadLiveModels();
     }
-  }, [apiKey, isOpen]);
+  }, [apiKey, isOpen, loadLiveModels]);
+
+  useEffect(() => {
+    if (initialAvailableModels.length > 0) setLiveModels(initialAvailableModels);
+    if (initialProviders.length > 0) setLiveProviders(initialProviders);
+  }, [initialAvailableModels, initialProviders]);
 
   const handleAddPattern = (patternToAdd?: string) => {
     const raw = (patternToAdd !== undefined ? patternToAdd : customPattern).trim();
@@ -123,6 +176,7 @@ export function ApiKeyPolicyModal({
   };
 
   const handleAddProviderModels = (providerModels: string[]) => {
+    if (!providerModels || providerModels.length === 0) return;
     setAllowedModels((prev) => {
       const existing = new Set(prev.map((m) => m.toLowerCase()));
       const toAdd = providerModels.filter((m) => !existing.has(m.toLowerCase()));
@@ -133,24 +187,35 @@ export function ApiKeyPolicyModal({
   // Filter available models for selection dropdown
   const filteredModels = useMemo(() => {
     const term = modelSearch.trim().toLowerCase();
-    const list = availableModels.filter(
+    let list = liveModels.filter(
       (m) => !allowedModels.some((am) => am.toLowerCase() === m.toLowerCase())
     );
-    if (!term) return list.slice(0, 50);
-    return list.filter((m) => m.toLowerCase().includes(term)).slice(0, 50);
-  }, [availableModels, allowedModels, modelSearch]);
+
+    if (selectedProviderFilter !== "all") {
+      const prov = liveProviders.find((p) => p.id === selectedProviderFilter);
+      if (prov) {
+        const provSet = new Set(prov.models.map((m) => m.toLowerCase()));
+        list = list.filter((m) => provSet.has(m.toLowerCase()));
+      }
+    }
+
+    if (term) {
+      list = list.filter((m) => m.toLowerCase().includes(term));
+    }
+    return list;
+  }, [liveModels, allowedModels, modelSearch, selectedProviderFilter, liveProviders]);
 
   // Models available under currently selected fallback provider
   const fallbackModelOptions = useMemo(() => {
-    if (!fallbackProvider) return availableModels;
-    const found = providers.find(
+    if (!fallbackProvider) return liveModels;
+    const found = liveProviders.find(
       (p) => p.id.toLowerCase() === fallbackProvider.toLowerCase()
     );
     if (found && found.models.length > 0) {
       return found.models;
     }
-    return availableModels;
-  }, [fallbackProvider, providers, availableModels]);
+    return liveModels;
+  }, [fallbackProvider, liveProviders, liveModels]);
 
   const handleSave = async () => {
     if (!apiKey) return;
@@ -196,19 +261,36 @@ export function ApiKeyPolicyModal({
   return (
     <Modal isOpen={isOpen} onClose={onClose} className="max-w-3xl">
       <ModalHeader>
-        <div className="flex items-center gap-2">
-          <div className="flex size-7 items-center justify-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-primary)] border border-[var(--surface-border)]">
-            <ShieldIcon className="size-4 text-emerald-500" />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="flex size-7 items-center justify-center rounded-lg bg-[var(--surface-muted)] text-[var(--text-primary)] border border-[var(--surface-border)]">
+              <ShieldIcon className="size-4 text-emerald-500" />
+            </div>
+            <div>
+              <ModalTitle>{t("policyModalTitle")}</ModalTitle>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                {t("policyModalSubtitle", { name: apiKey.name })}
+                <span className="ml-2 font-mono text-[11px] bg-[var(--surface-muted)] px-1.5 py-0.5 rounded border border-[var(--surface-border)]">
+                  {apiKey.keyPreview}
+                </span>
+              </p>
+            </div>
           </div>
-          <div>
-            <ModalTitle>{t("policyModalTitle")}</ModalTitle>
-            <p className="text-xs text-[var(--text-muted)] mt-0.5">
-              {t("policyModalSubtitle", { name: apiKey.name })}
-              <span className="ml-2 font-mono text-[11px] bg-[var(--surface-muted)] px-1.5 py-0.5 rounded border border-[var(--surface-border)]">
-                {apiKey.keyPreview}
-              </span>
-            </p>
-          </div>
+
+          <button
+            type="button"
+            onClick={async () => {
+              await loadLiveModels();
+              if (onRefreshModels) await onRefreshModels();
+              showToast("Models refreshed from proxy", "info");
+            }}
+            disabled={refreshing}
+            className="flex items-center gap-1 text-[11px] font-medium text-[var(--text-muted)] hover:text-[var(--text-primary)] bg-[var(--surface-muted)] hover:bg-[var(--surface-hover)] border border-[var(--surface-border)] px-2.5 py-1 rounded-md transition-colors mr-6"
+            title={t("policyRefreshModelsButton")}
+          >
+            <RefreshIcon className={`size-3 ${refreshing ? "animate-spin text-emerald-500" : ""}`} />
+            <span>{refreshing ? t("policyRefreshingModels") : t("policyRefreshModelsButton")}</span>
+          </button>
         </div>
       </ModalHeader>
 
@@ -253,11 +335,14 @@ export function ApiKeyPolicyModal({
               {/* Allowed Models Section */}
               <div className="rounded-xl border border-[var(--surface-border)] bg-[var(--surface-base)] p-4 space-y-3.5">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
                     <span className="text-xs font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
                       {t("policyAllowedModelsTitle")}
                     </span>
                     <HelpTooltip content={t("policyAllowedModelsTooltip")} />
+                    <span className="inline-flex items-center text-[10px] bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      {t("policyLiveModelsCount", { count: liveModels.length })}
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -280,22 +365,27 @@ export function ApiKeyPolicyModal({
                   </div>
                 </div>
 
-                {/* Quick Provider Presets */}
-                {providers.length > 0 && (
+                {/* Quick Provider Presets (populated with live models) */}
+                {liveProviders.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] text-[var(--text-muted)] mr-1">
                       Quick Add:
                     </span>
-                    {providers.slice(0, 6).map((provider) => (
-                      <button
-                        key={provider.id}
-                        type="button"
-                        onClick={() => handleAddProviderModels(provider.models)}
-                        className="text-[11px] font-medium px-2 py-0.5 rounded-full border border-[var(--surface-border)] bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-muted)] transition-colors"
-                      >
-                        {t("policyAddPreset", { provider: provider.name })}
-                      </button>
-                    ))}
+                    {liveProviders
+                      .filter((p) => p.models && p.models.length > 0)
+                      .slice(0, 8)
+                      .map((provider) => (
+                        <button
+                          key={provider.id}
+                          type="button"
+                          onClick={() => handleAddProviderModels(provider.models)}
+                          className="text-[11px] font-medium px-2 py-0.5 rounded-full border border-[var(--surface-border)] bg-[var(--surface-muted)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--text-muted)] transition-colors"
+                          title={`Add ${provider.models.length} ${provider.name} models`}
+                        >
+                          {t("policyAddPreset", { provider: provider.name })}
+                          <span className="ml-1 text-[9px] opacity-70 font-mono">({provider.models.length})</span>
+                        </button>
+                      ))}
                   </div>
                 )}
 
@@ -340,68 +430,94 @@ export function ApiKeyPolicyModal({
                 </div>
 
                 {/* Model Input & Search Dropdown */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  {/* Select System Model */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-[var(--text-muted)]">
-                      {t("policySelectModelPlaceholder")}
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={modelSearch}
-                        onChange={(e) => setModelSearch(e.target.value)}
-                        placeholder="Search system models..."
-                        className="w-full rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      />
-                      {filteredModels.length > 0 && modelSearch && (
-                        <div className="absolute z-20 left-0 right-0 mt-1 max-h-40 overflow-y-auto rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] shadow-lg p-1">
-                          {filteredModels.map((model) => (
-                            <button
-                              key={model}
-                              type="button"
-                              onClick={() => {
-                                handleAddPattern(model);
-                                setModelSearch("");
-                              }}
-                              className="w-full text-left px-2 py-1 text-xs font-mono rounded hover:bg-[var(--surface-muted)] text-[var(--text-primary)] truncate"
-                            >
-                              + {model}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                <div className="space-y-2 pt-1">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {/* Search & Select Real-time System Model */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-medium text-[var(--text-muted)]">
+                          {t("policySelectModelPlaceholder")}
+                        </label>
+                        {liveProviders.length > 0 && (
+                          <select
+                            value={selectedProviderFilter}
+                            onChange={(e) => setSelectedProviderFilter(e.target.value)}
+                            className="text-[10px] rounded border border-[var(--surface-border)] bg-[var(--surface-base)] px-1.5 py-0.5 text-[var(--text-secondary)] focus:outline-none"
+                          >
+                            <option value="all">{t("policyAllProviders")}</option>
+                            {liveProviders.map((p) => (
+                              <option key={p.id} value={p.id}>
+                                {p.name}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
 
-                  {/* Custom Wildcard Pattern Input */}
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-medium text-[var(--text-muted)]">
-                      {t("policyCustomPatternPlaceholder")}
-                    </label>
-                    <div className="flex items-center gap-1.5">
-                      <input
-                        type="text"
-                        value={customPattern}
-                        onChange={(e) => setCustomPattern(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter") {
-                            e.preventDefault();
-                            handleAddPattern();
-                          }
-                        }}
-                        placeholder="e.g. claude-3-5-*, gpt-4o*"
-                        className="w-full rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-1.5 text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                      />
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => handleAddPattern()}
-                        disabled={!customPattern.trim()}
-                        className="text-xs px-3 py-1.5 shrink-0 rounded-md"
-                      >
-                        {t("policyAddPatternButton")}
-                      </Button>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                          placeholder={`Search ${liveModels.length} models...`}
+                          className="w-full rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                        {filteredModels.length > 0 && (
+                          <div className="mt-1 max-h-48 overflow-y-auto rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] shadow-sm p-1">
+                            {filteredModels.slice(0, 40).map((model) => (
+                              <button
+                                key={model}
+                                type="button"
+                                onClick={() => {
+                                  handleAddPattern(model);
+                                }}
+                                className="w-full flex items-center justify-between px-2 py-1 text-xs font-mono rounded hover:bg-[var(--surface-muted)] text-[var(--text-primary)] text-left truncate transition-colors"
+                              >
+                                <span className="truncate">{model}</span>
+                                <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-sans shrink-0 ml-2">
+                                  + Add
+                                </span>
+                              </button>
+                            ))}
+                            {filteredModels.length > 40 && (
+                              <div className="text-center text-[10px] text-[var(--text-muted)] py-1 border-t border-[var(--surface-border)] mt-1">
+                                Showing 40 of {filteredModels.length} models. Type to filter.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Custom Wildcard Pattern Input */}
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-medium text-[var(--text-muted)]">
+                        {t("policyCustomPatternPlaceholder")}
+                      </label>
+                      <div className="flex items-center gap-1.5">
+                        <input
+                          type="text"
+                          value={customPattern}
+                          onChange={(e) => setCustomPattern(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddPattern();
+                            }
+                          }}
+                          placeholder="e.g. claude-3-5-*, gpt-4o*"
+                          className="w-full rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-1.5 text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                        />
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => handleAddPattern()}
+                          disabled={!customPattern.trim()}
+                          className="text-xs px-3 py-1.5 shrink-0 rounded-md"
+                        >
+                          {t("policyAddPatternButton")}
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -443,8 +559,7 @@ export function ApiKeyPolicyModal({
                         onChange={(e) => {
                           const prov = e.target.value;
                           setFallbackProvider(prov);
-                          // Auto-select first model if available
-                          const found = providers.find((p) => p.id === prov);
+                          const found = liveProviders.find((p) => p.id === prov);
                           const firstModel = found?.models[0];
                           if (firstModel && !fallbackModel) {
                             setFallbackModel(firstModel);
@@ -453,9 +568,9 @@ export function ApiKeyPolicyModal({
                         className="w-full rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-emerald-500"
                       >
                         <option value="">{t("policyFallbackProviderPlaceholder")}</option>
-                        {providers.map((p) => (
+                        {liveProviders.map((p) => (
                           <option key={p.id} value={p.id}>
-                            {p.name} ({p.id})
+                            {p.name} ({p.id}) {p.models.length > 0 ? `· ${p.models.length} models` : ""}
                           </option>
                         ))}
                       </select>

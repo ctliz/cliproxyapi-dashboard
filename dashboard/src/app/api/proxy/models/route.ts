@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db";
 import {
   buildAvailableModelIds,
   fetchProxyModels,
+  type ProxyModel,
 } from "@/lib/config-generators/shared";
 import {
   getInternalProxyUrl,
@@ -67,6 +68,18 @@ const STANDARD_MODELS: Record<string, string[]> = {
   ],
 };
 
+const KNOWN_PROVIDER_DEFS: { id: string; name: string }[] = [
+  { id: "antigravity", name: "Antigravity" },
+  { id: "anthropic", name: "Anthropic / Claude" },
+  { id: "google", name: "Google / Gemini" },
+  { id: "openai", name: "OpenAI" },
+  { id: "codex", name: "Codex" },
+  { id: "moonshot", name: "Moonshot / Kimi" },
+  { id: "kiro", name: "Kiro" },
+  { id: "iflow", name: "iFlow" },
+  { id: "qwen", name: "Qwen" },
+];
+
 async function fetchManagementJson(path: string) {
   try {
     const baseUrl =
@@ -88,7 +101,7 @@ async function fetchManagementJson(path: string) {
   }
 }
 
-function extractOAuthAccounts(data: unknown): { id: string; name: string }[] {
+function extractOAuthAccounts(data: unknown): { id: string; name: string; provider?: string }[] {
   if (typeof data !== "object" || data === null) return [];
   const record = data as Record<string, unknown>;
   const files = record["files"];
@@ -101,6 +114,7 @@ function extractOAuthAccounts(data: unknown): { id: string; name: string }[] {
     .map((entry) => ({
       id: typeof entry.id === "string" ? entry.id : String(entry.name),
       name: String(entry.name),
+      provider: typeof entry.provider === "string" ? entry.provider : undefined,
     }));
 }
 
@@ -111,15 +125,24 @@ export async function GET() {
   }
 
   try {
-    // 1. Fetch user's API key to probe proxy models
+    // 1. Fetch user's API key to query /v1/models directly
     const userApiKeys = await prisma.userApiKey.findMany({
       where: { userId: session.userId },
       select: { key: true },
-      take: 1,
+      orderBy: { createdAt: "desc" },
     });
-    const apiKeyForProxy = userApiKeys[0]?.key || "";
 
-    // 2. Fetch management data & custom providers in parallel
+    let proxyModels: ProxyModel[] = [];
+    const proxyUrl = getInternalProxyUrl();
+
+    // Try user keys to query live /v1/models
+    for (const k of userApiKeys) {
+      if (!k.key) continue;
+      proxyModels = await fetchProxyModels(proxyUrl, k.key);
+      if (proxyModels.length > 0) break;
+    }
+
+    // 2. Parallel fetch of management config, auth-files, and custom providers
     const [managementConfig, authFilesData, customProviders] = await Promise.all([
       fetchManagementJson("config"),
       fetchManagementJson("auth-files"),
@@ -133,31 +156,30 @@ export async function GET() {
       }),
     ]);
 
-    const proxyModels = apiKeyForProxy
-      ? await fetchProxyModels(getInternalProxyUrl(), apiKeyForProxy)
-      : [];
-
     const oauthAccounts = extractOAuthAccounts(authFilesData);
-    const oauthAliasIds = Object.keys(
-      extractOAuthModelAliases(managementConfig as ConfigData | null, oauthAccounts)
+    const oauthAliases = extractOAuthModelAliases(
+      managementConfig as ConfigData | null,
+      oauthAccounts
     );
+    const oauthAliasIds = Object.keys(oauthAliases);
 
     const customModelIds = customProviders.flatMap((cp) =>
       cp.models.map((m) => m.alias || m.upstreamName)
     );
 
-    // Combine discovered models
-    const discoveredModelIds = buildAvailableModelIds(proxyModels, [
+    // Combine all live discovered models
+    const liveDiscoveredIds = buildAvailableModelIds(proxyModels, [
       ...oauthAliasIds,
       ...customModelIds,
     ]);
 
-    // Fallback to standard models if nothing discovered yet
+    // Fallback to standard models if proxy is completely empty
     const fallbackAll = Object.values(STANDARD_MODELS).flat();
     const allModels = Array.from(
-      new Set(discoveredModelIds.length > 0 ? discoveredModelIds : fallbackAll)
+      new Set(liveDiscoveredIds.length > 0 ? liveDiscoveredIds : fallbackAll)
     ).sort((a, b) => a.localeCompare(b));
 
+    // Build source mapping
     const sourceMap = new Map<string, string>();
     for (const m of proxyModels) {
       sourceMap.set(m.id, resolveOwnedByDisplay(m.owned_by));
@@ -170,31 +192,86 @@ export async function GET() {
 
     const grouped = groupModelsByProvider(allModels, sourceMap);
 
-    // Build providers list for fallback selection
-    const standardProviders = [
-      { id: "antigravity", name: "Antigravity", models: STANDARD_MODELS.antigravity },
-      { id: "anthropic", name: "Anthropic / Claude", models: STANDARD_MODELS.anthropic },
-      { id: "google", name: "Google / Gemini", models: STANDARD_MODELS.google },
-      { id: "openai", name: "OpenAI", models: STANDARD_MODELS.openai },
-      { id: "codex", name: "Codex", models: STANDARD_MODELS.codex },
-      { id: "moonshot", name: "Moonshot / Kimi", models: STANDARD_MODELS.moonshot },
-      { id: "kiro", name: "Kiro", models: STANDARD_MODELS.kiro },
-      { id: "iflow", name: "iFlow", models: STANDARD_MODELS.iflow },
-      { id: "qwen", name: "Qwen", models: STANDARD_MODELS.qwen },
-    ];
+    // Group live models dynamically by provider ID
+    const liveProviderModelsMap = new Map<string, Set<string>>();
 
-    const customProvidersList = customProviders.map((cp) => ({
-      id: cp.providerId,
-      name: cp.name || cp.providerId,
-      models: cp.models.map((m) => m.alias || m.upstreamName),
-    }));
+    for (const m of proxyModels) {
+      const pId = (m.owned_by || "other").toLowerCase();
+      if (!liveProviderModelsMap.has(pId)) {
+        liveProviderModelsMap.set(pId, new Set());
+      }
+      liveProviderModelsMap.get(pId)!.add(m.id);
+    }
 
-    const providers = [...standardProviders, ...customProvidersList];
+    // Add OAuth aliases to their respective providers if known
+    if (managementConfig && typeof managementConfig === "object") {
+      const aliasesObj = (managementConfig as Record<string, unknown>)["oauth-model-alias"];
+      if (aliasesObj && typeof aliasesObj === "object") {
+        for (const [providerKey, aliasEntries] of Object.entries(aliasesObj)) {
+          if (!Array.isArray(aliasEntries)) continue;
+          const pId = providerKey.toLowerCase();
+          if (!liveProviderModelsMap.has(pId)) {
+            liveProviderModelsMap.set(pId, new Set());
+          }
+          for (const entry of aliasEntries) {
+            if (entry && typeof entry === "object" && typeof entry.alias === "string") {
+              liveProviderModelsMap.get(pId)!.add(entry.alias);
+            }
+          }
+        }
+      }
+    }
+
+    // Build providers list dynamically
+    const providersList: { id: string; name: string; models: string[] }[] = [];
+    const processedProviderIds = new Set<string>();
+
+    for (const def of KNOWN_PROVIDER_DEFS) {
+      processedProviderIds.add(def.id.toLowerCase());
+      const liveSet = liveProviderModelsMap.get(def.id.toLowerCase());
+      const models =
+        liveSet && liveSet.size > 0
+          ? Array.from(liveSet).sort((a, b) => a.localeCompare(b))
+          : STANDARD_MODELS[def.id] || [];
+
+      providersList.push({
+        id: def.id,
+        name: def.name,
+        models,
+      });
+    }
+
+    // Add any other provider discovered in proxyModels not in KNOWN_PROVIDER_DEFS
+    for (const [pId, modelsSet] of liveProviderModelsMap.entries()) {
+      if (!processedProviderIds.has(pId)) {
+        processedProviderIds.add(pId);
+        providersList.push({
+          id: pId,
+          name: resolveOwnedByDisplay(pId),
+          models: Array.from(modelsSet).sort((a, b) => a.localeCompare(b)),
+        });
+      }
+    }
+
+    // Add custom providers from database
+    for (const cp of customProviders) {
+      const pId = cp.providerId.toLowerCase();
+      if (!processedProviderIds.has(pId)) {
+        processedProviderIds.add(pId);
+        providersList.push({
+          id: cp.providerId,
+          name: cp.name || cp.providerId,
+          models: cp.models.map((m) => m.alias || m.upstreamName),
+        });
+      }
+    }
 
     return NextResponse.json({
       models: allModels,
       groups: grouped,
-      providers,
+      providers: providersList,
+      source: proxyModels.length > 0 ? "live" : "fallback",
+      discoveredCount: liveDiscoveredIds.length,
     });
   } catch (error) {
     return Errors.internal("Failed to fetch models", error);
