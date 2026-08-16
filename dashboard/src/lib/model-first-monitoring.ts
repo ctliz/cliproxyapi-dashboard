@@ -36,6 +36,7 @@ export interface QuotaGroup {
   fullRecoveryAt?: string | null;
   bottleneckModel?: string | null;
   hasMixedResetTimes?: boolean;
+  windowType?: "weekly" | "five-hour" | "provider";
 }
 
 export interface QuotaAccount {
@@ -81,6 +82,8 @@ export interface ModelFirstAccountSummary {
   nextWindowResetAt: string | null;
   fullWindowResetAt: string | null;
   nextRecoveryAt: string | null;
+  weeklyRemainingFraction: number | null;
+  fiveHourRemainingFraction: number | null;
 }
 
 export interface ModelFirstProviderSummary {
@@ -248,6 +251,8 @@ export function summarizeModelFirstAccount(account: QuotaAccount): ModelFirstAcc
     nextWindowResetAt: pickIso(nextWindowResetTimes, "min"),
     fullWindowResetAt: pickIso(fullWindowResetTimes, "max"),
     nextRecoveryAt: pickIso(nextRecoveryTimes, "min"),
+    weeklyRemainingFraction: minFractions.length > 0 ? Math.min(...minFractions) : null,
+    fiveHourRemainingFraction: null,
   };
 }
 

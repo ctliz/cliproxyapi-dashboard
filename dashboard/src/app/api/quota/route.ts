@@ -6,12 +6,15 @@ import { quotaCache, CACHE_TTL } from "@/lib/cache";
 import { Errors } from "@/lib/errors";
 import {
   ANTIGRAVITY_QUOTA_ENDPOINTS,
-  enrichModelFirstGroup,
   isModelFirstProvider,
   type QuotaAccount,
   type QuotaGroup,
   type QuotaResponse,
 } from "@/lib/model-first-monitoring";
+import {
+  groupAntigravityModels,
+  type AntigravityModel,
+} from "@/lib/antigravity-model-grouping";
 
 const CLIPROXYAPI_MANAGEMENT_URL =
   process.env.CLIPROXYAPI_MANAGEMENT_URL ||
@@ -33,14 +36,6 @@ interface AuthFile {
 
 interface AuthFilesResponse {
   files: AuthFile[];
-}
-
-interface AntigravityModel {
-  displayName?: string;
-  quotaInfo?: {
-    remainingFraction?: number | null;
-    resetTime: string | null;
-  };
 }
 
 interface AntigravityResponse {
@@ -102,100 +97,6 @@ interface ClaudeOAuthUsageResponse {
     monthly_limit?: number;
     used_credits?: number;
   };
-}
-
-const MODEL_GROUPS = {
-  "Claude/GPT": ["claude", "gpt"],
-  "Gemini 3 Pro": ["gemini-3-pro"],
-  "Gemini 2.5 Flash": ["gemini-2.5-flash"],
-  "Gemini 3 Flash": ["gemini-3-flash"],
-  "Gemini 2.5 Pro": ["gemini-2.5-pro"],
-  Other: [],
-} as const;
-
-function categorizeModel(modelId: string): string {
-  const lowerModelId = modelId.toLowerCase();
-  
-  for (const [groupName, identifiers] of Object.entries(MODEL_GROUPS)) {
-    if (groupName === "Other") continue;
-    if (identifiers.some((id) => lowerModelId.includes(id))) {
-      return groupName;
-    }
-  }
-  
-  return "Other";
-}
-
-function groupAntigravityModels(
-  models: Record<string, AntigravityModel>
-): QuotaGroup[] {
-  const groups: Record<
-    string,
-    {
-      id: string;
-      label: string;
-      models: Array<{
-        id: string;
-        displayName: string;
-        remainingFraction: number;
-        resetTime: string | null;
-      }>;
-    }
-  > = {};
-
-  for (const [modelId, modelData] of Object.entries(models)) {
-    if (!modelData.quotaInfo) continue;
-
-    const remainingFraction =
-      typeof modelData.quotaInfo.remainingFraction === "number" &&
-      Number.isFinite(modelData.quotaInfo.remainingFraction)
-        ? modelData.quotaInfo.remainingFraction
-        : 0;
-
-    const groupName = categorizeModel(modelId);
-    
-    if (!groups[groupName]) {
-      groups[groupName] = {
-        id: groupName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-        label: groupName,
-        models: [],
-      };
-    }
-
-    groups[groupName].models.push({
-      id: modelId,
-      displayName: modelData.displayName?.trim() || modelId,
-      remainingFraction,
-      resetTime: modelData.quotaInfo.resetTime,
-    });
-  }
-
-  const groupOrder = Object.keys(MODEL_GROUPS);
-
-  return Object.values(groups)
-    .map((group) => {
-      const sortedModels = [...group.models].sort((left, right) => {
-        const resetLeft = left.resetTime ? Date.parse(left.resetTime) : Number.POSITIVE_INFINITY;
-        const resetRight = right.resetTime ? Date.parse(right.resetTime) : Number.POSITIVE_INFINITY;
-        if (resetLeft !== resetRight) return resetLeft - resetRight;
-        return left.displayName.localeCompare(right.displayName);
-      });
-
-      return enrichModelFirstGroup({
-        ...group,
-        remainingFraction: 1,
-        resetTime: null,
-        models: sortedModels,
-      });
-    })
-    .sort((left, right) => {
-      const orderLeft = groupOrder.indexOf(left.label);
-      const orderRight = groupOrder.indexOf(right.label);
-      const normalizedLeft = orderLeft === -1 ? Number.MAX_SAFE_INTEGER : orderLeft;
-      const normalizedRight = orderRight === -1 ? Number.MAX_SAFE_INTEGER : orderRight;
-      if (normalizedLeft !== normalizedRight) return normalizedLeft - normalizedRight;
-      return left.label.localeCompare(right.label);
-    });
 }
 
 function parseAntigravityPayload(payload: unknown): Record<string, AntigravityModel> | null {

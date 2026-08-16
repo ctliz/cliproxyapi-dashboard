@@ -109,6 +109,10 @@ ssl/
 # Backups
 backups/
 
+# Reports
+/reports/
+
+
 # Screenshots and debug artifacts
 *.png
 !docs/screenshots/*.png

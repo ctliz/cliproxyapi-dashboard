@@ -1,0 +1,6 @@
+-- AlterTable
+ALTER TABLE "user_api_keys"
+  ADD COLUMN IF NOT EXISTS "policyEnabled" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "allowedModels" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+  ADD COLUMN IF NOT EXISTS "fallbackProvider" TEXT,
+  ADD COLUMN IF NOT EXISTS "fallbackModel" TEXT;

@@ -38,6 +38,7 @@ export const API_ENDPOINTS = {
   },
   USER: {
     API_KEYS: "/api/user/api-keys",
+    API_KEY_POLICY: (id: string) => `/api/user/api-keys/${id}/policy`,
     CONFIG: "/api/user/config",
   },
   PROVIDERS: {
@@ -112,6 +113,7 @@ export const API_ENDPOINTS = {
   PROXY: {
     STATUS: "/api/proxy/status",
     OAUTH_SETTINGS: "/api/proxy/oauth-settings",
+    MODELS: "/api/proxy/models",
   },
   CONFIG_SYNC: {
     TOKENS: "/api/config-sync/tokens",

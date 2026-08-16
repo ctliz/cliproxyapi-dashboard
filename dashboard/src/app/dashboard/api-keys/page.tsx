@@ -9,14 +9,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { HelpTooltip } from "@/components/ui/tooltip";
 import { useTranslations } from "next-intl";
 import { API_ENDPOINTS } from "@/lib/api-endpoints";
-
-interface ApiKey {
-  id: string;
-  name: string;
-  keyPreview: string;
-  createdAt: string;
-  lastUsedAt: string | null;
-}
+import { ApiKeyPolicyModal, type ApiKeyItem } from "@/components/api-keys/api-key-policy-modal";
 
 function CopyIcon({ className }: { className?: string }) {
   return (
@@ -31,6 +24,14 @@ function CheckIcon({ className }: { className?: string }) {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
       <polyline points="20 6 9 17 4 12" />
+    </svg>
+  );
+}
+
+function ShieldIcon({ className }: { className?: string }) {
+  return (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
     </svg>
   );
 }
@@ -58,10 +59,10 @@ function useCopyToClipboard() {
   return { copiedKey, copy };
 }
 
-const EMPTY_KEYS: ApiKey[] = [];
+const EMPTY_KEYS: ApiKeyItem[] = [];
 
 export default function ApiKeysPage() {
-  const [apiKeys, setApiKeys] = useState<ApiKey[]>(EMPTY_KEYS);
+  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>(EMPTY_KEYS);
   const [loading, setLoading] = useState(true);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [keyNameInput, setKeyNameInput] = useState("");
@@ -70,6 +71,13 @@ export default function ApiKeysPage() {
   const [creating, setCreating] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
+  // Policy Modal state
+  const [selectedPolicyKey, setSelectedPolicyKey] = useState<ApiKeyItem | null>(null);
+  const [isPolicyModalOpen, setIsPolicyModalOpen] = useState(false);
+  const [availableModels, setAvailableModels] = useState<string[]>([]);
+  const [providers, setProviders] = useState<{ id: string; name: string; models: string[] }[]>([]);
+
   const { showToast } = useToast();
   const { copiedKey, copy } = useCopyToClipboard();
   const t = useTranslations("apiKeys");
@@ -96,17 +104,31 @@ export default function ApiKeysPage() {
     }
   }, [showToast, t]);
 
+  const fetchModelsAndProviders = useCallback(async (signal?: AbortSignal) => {
+    try {
+      const res = await fetch(API_ENDPOINTS.PROXY.MODELS, { signal });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.models)) setAvailableModels(data.models);
+        if (Array.isArray(data.providers)) setProviders(data.providers);
+      }
+    } catch {
+      // Best-effort background load
+    }
+  }, []);
+
   useEffect(() => {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => {
       void fetchApiKeys(controller.signal);
+      void fetchModelsAndProviders(controller.signal);
     }, 0);
 
     return () => {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [fetchApiKeys]);
+  }, [fetchApiKeys, fetchModelsAndProviders]);
 
   const handleCreateKey = async () => {
     setCreating(true);
@@ -115,7 +137,7 @@ export default function ApiKeysPage() {
       const res = await fetch(API_ENDPOINTS.USER.API_KEYS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: keyNameInput.trim() || tc('default') }),
+        body: JSON.stringify({ name: keyNameInput.trim() || tc("default") }),
       });
 
       if (!res.ok) {
@@ -150,7 +172,7 @@ export default function ApiKeysPage() {
       const res = await fetch(
         `${API_ENDPOINTS.USER.API_KEYS}?id=${encodeURIComponent(id)}`,
         {
-        method: "DELETE",
+          method: "DELETE",
         }
       );
 
@@ -166,6 +188,23 @@ export default function ApiKeysPage() {
     }
   };
 
+  const handleOpenPolicyModal = (apiKey: ApiKeyItem) => {
+    setSelectedPolicyKey(apiKey);
+    setIsPolicyModalOpen(true);
+  };
+
+  const handlePolicySaved = (updated: {
+    id: string;
+    policyEnabled: boolean;
+    allowedModels: string[];
+    fallbackProvider: string | null;
+    fallbackModel: string | null;
+  }) => {
+    setApiKeys((prev) =>
+      prev.map((k) => (k.id === updated.id ? { ...k, ...updated } : k))
+    );
+  };
+
   const handleCloseModal = () => {
     setIsModalOpen(false);
     setNewKeyValue(null);
@@ -176,17 +215,17 @@ export default function ApiKeysPage() {
       <section className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">{t('pageTitle')}</h1>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">{t('pageDescription')} <HelpTooltip content={t('pageTooltip')} /></p>
+            <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">{t("pageTitle")}</h1>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">{t("pageDescription")} <HelpTooltip content={t("pageTooltip")} /></p>
           </div>
           <Button onClick={() => { setKeyNameInput(""); setIsCreateModalOpen(true); }} disabled={creating} className="px-2.5 py-1 text-xs" data-testid="api-key-create-trigger">
-            {t('createKeyButton')}
+            {t("createKeyButton")}
           </Button>
         </div>
       </section>
 
       {loading ? (
-        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-6 text-center text-sm text-[var(--text-muted)]">{t('loadingText')}</div>
+        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-6 text-center text-sm text-[var(--text-muted)]">{t("loadingText")}</div>
       ) : apiKeys.length === 0 ? (
         <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-8">
           <div className="flex flex-col items-center justify-center gap-4 text-center">
@@ -199,8 +238,8 @@ export default function ApiKeysPage() {
               </svg>
             </div>
             <div className="space-y-2">
-              <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t('emptyTitle')}</h3>
-              <p className="text-xs text-[var(--text-muted)]">{t('emptyDescription')}</p>
+              <h3 className="text-sm font-semibold text-[var(--text-primary)]">{t("emptyTitle")}</h3>
+              <p className="text-xs text-[var(--text-muted)]">{t("emptyDescription")}</p>
             </div>
             <Button onClick={() => { setKeyNameInput(""); setIsCreateModalOpen(true); }} disabled={creating} className="px-3 py-1.5 text-xs">
               {t("createApiKeyButton")}
@@ -209,31 +248,123 @@ export default function ApiKeysPage() {
         </div>
       ) : (
         <div className="overflow-x-auto">
-          <section className="min-w-[600px] overflow-hidden rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]">
-            <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1fr)_180px_160px_110px] border-b border-[var(--surface-border)] bg-[var(--surface-base)]/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-              <span>{t('tableHeaderName')}</span>
-              <span>{t('tableHeaderCreated')}</span>
-              <span>{t('tableHeaderLastUsed')}</span>
-              <span>{t('tableHeaderActions')}</span>
+          <section className="min-w-[760px] overflow-hidden rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]">
+            <div className="sticky top-0 z-10 grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_130px_130px_160px] border-b border-[var(--surface-border)] bg-[var(--surface-base)]/95 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+              <span>{t("tableHeaderName")}</span>
+              <span>{t("tableHeaderPolicy")}</span>
+              <span>{t("tableHeaderCreated")}</span>
+              <span>{t("tableHeaderLastUsed")}</span>
+              <span className="text-right">{t("tableHeaderActions")}</span>
             </div>
-          {apiKeys.map((apiKey) => (
-            <div key={apiKey.id} className="grid grid-cols-[minmax(0,1fr)_180px_160px_110px] items-center border-b border-[var(--surface-border)] px-3 py-2 last:border-b-0">
-              <div className="min-w-0">
-                <p className="truncate text-xs font-medium text-[var(--text-primary)]">{apiKey.name}</p>
-                <p className="mt-0.5 truncate font-mono text-xs text-[var(--text-muted)]">{apiKey.keyPreview}</p>
-              </div>
-              <span className="text-xs text-[var(--text-muted)]">{new Date(apiKey.createdAt).toLocaleDateString()}</span>
-              <span className="text-xs text-[var(--text-muted)]">{apiKey.lastUsedAt ? new Date(apiKey.lastUsedAt).toLocaleDateString() : t('neverUsed')}</span>
-              <div className="flex justify-end">
-                <Button variant="danger" onClick={() => confirmDelete(apiKey.id)} className="px-2.5 py-1 text-xs" data-testid={`api-key-delete-trigger-${apiKey.id}`}>
-                  {t('deleteButton')}
-                </Button>
-              </div>
-            </div>
-          ))}
+            {apiKeys.map((apiKey) => {
+              const hasPolicy = Boolean(apiKey.policyEnabled);
+              const allowedCount = apiKey.allowedModels?.length || 0;
+              const fallbackText =
+                apiKey.fallbackProvider && apiKey.fallbackModel
+                  ? t("policyTooltipFallback", {
+                      provider: apiKey.fallbackProvider,
+                      model: apiKey.fallbackModel,
+                    })
+                  : t("policyTooltipNoFallback");
+              const tooltipContent = hasPolicy
+                ? t("policyTooltipActive", {
+                    models: apiKey.allowedModels?.join(", ") || "None",
+                    fallback: fallbackText,
+                  })
+                : t("policyDisabledNotice");
+
+              return (
+                <div
+                  key={apiKey.id}
+                  className="grid grid-cols-[minmax(0,1.2fr)_minmax(0,1.4fr)_130px_130px_160px] items-center border-b border-[var(--surface-border)] px-3 py-2.5 last:border-b-0"
+                >
+                  <div className="min-w-0 pr-2">
+                    <p className="truncate text-xs font-medium text-[var(--text-primary)]">
+                      {apiKey.name}
+                    </p>
+                    <p className="mt-0.5 truncate font-mono text-xs text-[var(--text-muted)]">
+                      {apiKey.keyPreview}
+                    </p>
+                  </div>
+
+                  {/* Policy Column */}
+                  <div className="min-w-0 pr-2">
+                    {hasPolicy ? (
+                      <div className="flex flex-col gap-0.5">
+                        <div className="flex items-center gap-1">
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 border border-emerald-500/20"
+                            title={tooltipContent}
+                          >
+                            <ShieldIcon className="size-3 shrink-0" />
+                            {t("policyBadgeActive", { count: allowedCount })}
+                          </span>
+                          <HelpTooltip content={tooltipContent} />
+                        </div>
+                        {apiKey.fallbackProvider && apiKey.fallbackModel && (
+                          <span
+                            className="truncate font-mono text-[10px] text-[var(--text-muted)]"
+                            title={`Fallback: ${apiKey.fallbackProvider}/${apiKey.fallbackModel}`}
+                          >
+                            ↳ {apiKey.fallbackProvider}/{apiKey.fallbackModel}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="inline-flex items-center rounded-full bg-[var(--surface-muted)] px-2 py-0.5 text-[11px] font-medium text-[var(--text-muted)] border border-[var(--surface-border)]">
+                        {t("policyBadgeDisabled")}
+                      </span>
+                    )}
+                  </div>
+
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {new Date(apiKey.createdAt).toLocaleDateString()}
+                  </span>
+
+                  <span className="text-xs text-[var(--text-muted)]">
+                    {apiKey.lastUsedAt
+                      ? new Date(apiKey.lastUsedAt).toLocaleDateString()
+                      : t("neverUsed")}
+                  </span>
+
+                  <div className="flex items-center justify-end gap-1.5">
+                    <Button
+                      variant="secondary"
+                      onClick={() => handleOpenPolicyModal(apiKey)}
+                      className="px-2.5 py-1 text-xs"
+                      data-testid={`api-key-policy-trigger-${apiKey.id}`}
+                    >
+                      <ShieldIcon className="size-3 mr-1 inline-block" />
+                      {t("policyButton")}
+                    </Button>
+                    <Button
+                      variant="danger"
+                      onClick={() => confirmDelete(apiKey.id)}
+                      className="px-2.5 py-1 text-xs"
+                      data-testid={`api-key-delete-trigger-${apiKey.id}`}
+                    >
+                      {t("deleteButton")}
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
           </section>
         </div>
       )}
+
+      {/* ── Model Policy Modal ── */}
+      <ApiKeyPolicyModal
+        isOpen={isPolicyModalOpen}
+        onClose={() => {
+          setIsPolicyModalOpen(false);
+          setSelectedPolicyKey(null);
+        }}
+        apiKey={selectedPolicyKey}
+        onSaved={handlePolicySaved}
+        availableModels={availableModels}
+        providers={providers}
+      />
 
       {/* ── Create Key Modal ── */}
       <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)}>
@@ -244,7 +375,7 @@ export default function ApiKeysPage() {
           <div className="space-y-4">
             <div>
               <label htmlFor="key-name-input" className="mb-2 block text-sm font-semibold text-[var(--text-secondary)]">
-                {t('keyNameLabel')}
+                {t("keyNameLabel")}
               </label>
               <Input
                 type="text"
@@ -254,7 +385,7 @@ export default function ApiKeysPage() {
                 placeholder={t("keyNamePlaceholder")}
                 disabled={creating}
               />
-              <p className="mt-1.5 text-xs text-[var(--text-muted)]">{t('keyNameHint')}</p>
+              <p className="mt-1.5 text-xs text-[var(--text-muted)]">{t("keyNameHint")}</p>
             </div>
           </div>
         </ModalContent>
@@ -275,7 +406,7 @@ export default function ApiKeysPage() {
         <ModalContent>
           <div className="space-y-4">
             <div className="rounded-sm border border-[var(--surface-border)] bg-[var(--surface-base)] p-4 text-sm">
-              <div className="mb-2 font-medium text-[var(--text-primary)]">{t('copyThisKey')}</div>
+              <div className="mb-2 font-medium text-[var(--text-primary)]">{t("copyThisKey")}</div>
               <div className="relative group">
                 <div className="break-all rounded-sm border border-[var(--surface-border)] bg-[var(--surface-base)] p-3 pr-12 font-mono text-xs text-[var(--text-primary)]">
                   {newKeyValue}
@@ -289,14 +420,14 @@ export default function ApiKeysPage() {
                     }
                   }}
                   className="absolute right-2.5 top-2.5 rounded-sm border border-[var(--surface-border)] bg-[var(--surface-muted)] p-1.5 text-[var(--text-muted)] transition-colors duration-200 hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
-                  title={t('copyButtonTitle')}
+                  title={t("copyButtonTitle")}
                 >
                   {copiedKey === "modal" ? <CheckIcon /> : <CopyIcon />}
                 </button>
               </div>
             </div>
             <div className="rounded-sm border border-amber-500/20 bg-amber-500/10 p-3 text-sm">
-              <span className="text-amber-700">{t('keyShownOnce')}</span>
+              <span className="text-amber-700">{t("keyShownOnce")}</span>
             </div>
           </div>
         </ModalContent>

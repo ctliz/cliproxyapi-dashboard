@@ -134,8 +134,8 @@ export function QuotaDetails({
                   <span>{t("accountColumn")}</span>
                   <span>{t("providerColumn")}</span>
                   <span>{t("statusColumn")}</span>
-                  <span>{section.modelFirstView ? t("readyColumnLabel") : t("longTermLabel")}</span>
-                  <span>{section.modelFirstView ? t("recoveryColumnLabel") : t("shortTermLabel")}</span>
+                  <span>{section.modelFirstView ? t("weeklyLabel") : t("longTermLabel")}</span>
+                  <span>{section.modelFirstView ? t("resetColumnLabel") : t("shortTermLabel")}</span>
                 </div>
 
                 {section.accounts.map((account) => {
@@ -199,14 +199,14 @@ export function QuotaDetails({
                         {section.modelFirstView ? (
                           <>
                             <span className="text-xs text-[var(--text-secondary)]">
-                              {accountSummary
-                                ? accountQuotaUnverified
-                                  ? t("snapshotFullLabel")
-                                  : `${accountSummary.readyGroups}/${accountSummary.totalGroups}`
-                                : "-"}
+                              {accountSummary?.weeklyRemainingFraction === null || !accountSummary
+                                ? "-"
+                                : `${Math.round(accountSummary.weeklyRemainingFraction * 100)}%`}
                             </span>
                             <span className="text-xs text-[var(--text-muted)]">
-                              {accountSummary ? formatRelativeTime(accountSummary.nextRecoveryAt ?? accountSummary.nextWindowResetAt, t) : "-"}
+                              {accountSummary
+                                ? formatRelativeTime(accountSummary.fullWindowResetAt ?? accountSummary.nextWindowResetAt, t)
+                                : "-"}
                             </span>
                           </>
                         ) : (
@@ -249,6 +249,8 @@ export function QuotaDetails({
                             <div className="mb-2 flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
                               <span>{t("snapshotStatusLabel")}: {accountSummary.staleSnapshot ? t("staleLabel") : t("freshLabel")}</span>
                               <span>{t("confidenceLabel")}: {accountQuotaUnverified ? t("snapshotOnlyLabel") : t("groupedReadyLabel")}</span>
+                              <span>{t("weeklyLabel")}: {accountSummary.weeklyRemainingFraction === null ? "-" : `${Math.round(accountSummary.weeklyRemainingFraction * 100)}%`}</span>
+                              <span>{t("fiveHourLabel")}: {t("notProvidedLabel")}</span>
                               <span>{t("readyGroupsLabel")}: {accountSummary.readyGroups}</span>
                             </div>
                           )}
@@ -270,6 +272,8 @@ export function QuotaDetails({
                                     const enrichedGroup = group.monitorMode === "model-first" ? group : enrichModelFirstGroup(group);
                                     const minPct = normalizeFraction(enrichedGroup.minRemainingFraction ?? enrichedGroup.remainingFraction);
                                     const p50Pct = normalizeFraction(enrichedGroup.p50RemainingFraction);
+                                    const progress = minPct ?? p50Pct;
+                                    const progressPercent = progress === null ? null : Math.round(progress * 100);
                                     return (
                                       <div
                                         key={group.id}
@@ -279,13 +283,25 @@ export function QuotaDetails({
                                         <span className="text-xs text-[var(--text-secondary)]">
                                           {`${enrichedGroup.effectiveReadyModelCount ?? enrichedGroup.readyModelCount ?? 0}/${enrichedGroup.totalModelCount ?? enrichedGroup.models.length}`}
                                         </span>
-                                        <span className="text-xs text-[var(--text-secondary)]">
-                                          {minPct === null ? "-" : `${Math.round(minPct * 100)}%`}
-                                          {p50Pct === null ? "" : ` / ${Math.round(p50Pct * 100)}%`}
+                                        <span className="block pr-3">
+                                          <span className="text-xs text-[var(--text-secondary)]">
+                                            {minPct === null ? "-" : `${Math.round(minPct * 100)}%`}
+                                            {p50Pct !== null && p50Pct !== minPct ? ` / ${Math.round(p50Pct * 100)}%` : ""}
+                                          </span>
+                                          {progress !== null && progressPercent !== null && (
+                                            <span className="mt-1 block h-1.5 w-full overflow-hidden rounded-full bg-[var(--surface-muted)]">
+                                              <span
+                                                className={cn("block h-full", getCapacityBarClass(progress))}
+                                                style={{ width: `${progressPercent}%` }}
+                                              />
+                                            </span>
+                                          )}
                                         </span>
                                         <span className="text-xs text-[var(--text-muted)]">{formatRelativeTime(enrichedGroup.nextWindowResetAt ?? enrichedGroup.resetTime, t)}</span>
                                         <span className="text-xs text-[var(--text-muted)]">{formatRelativeTime(enrichedGroup.fullWindowResetAt ?? enrichedGroup.resetTime, t)}</span>
-                                        <span className="text-xs text-[var(--text-muted)]">{formatRelativeTime(enrichedGroup.nextRecoveryAt, t)}</span>
+                                        <span className="text-xs text-[var(--text-muted)]">
+                                          {formatRelativeTime(enrichedGroup.nextRecoveryAt ?? enrichedGroup.nextWindowResetAt ?? enrichedGroup.resetTime, t)}
+                                        </span>
                                         <span className="truncate text-xs text-[var(--text-muted)]">{enrichedGroup.bottleneckModel ?? "-"}</span>
                                       </div>
                                     );

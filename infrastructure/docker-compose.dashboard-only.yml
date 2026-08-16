@@ -30,7 +30,7 @@ services:
       start_period: 10s
 
   dashboard:
-    image: ghcr.io/itsmylife44/cliproxyapi-dashboard/dashboard:latest
+    image: ${DASHBOARD_IMAGE:-ghcr.io/itsmylife44/cliproxyapi-dashboard/dashboard:latest}
     container_name: cliproxyapi-dashboard
     restart: unless-stopped
     cpus: 1.0

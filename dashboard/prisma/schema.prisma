@@ -79,12 +79,16 @@ model SyncToken {
 }
 
 model UserApiKey {
-  id         String    @id @default(cuid())
-  userId     String
-  key        String    @unique
-  name       String    @default("Default")
-  lastUsedAt DateTime?
-  createdAt  DateTime  @default(now())
+  id               String    @id @default(cuid())
+  userId           String
+  key              String    @unique
+  name             String    @default("Default")
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  policyEnabled    Boolean   @default(false)
+  allowedModels    String[]  @default([])
+  fallbackProvider String?
+  fallbackModel    String?
 
   user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   usageRecords UsageRecord[]

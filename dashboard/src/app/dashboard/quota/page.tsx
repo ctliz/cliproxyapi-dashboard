@@ -449,10 +449,12 @@ export default function QuotaPage() {
                 </div>
                 <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                    {t("closestResetLabel")} <HelpTooltip content={t("closestResetTooltip")} />
+                    {t("weeklyLabel")} <HelpTooltip content={t("weeklyTooltip")} />
                   </p>
                   <p className="mt-0.5 text-xs font-semibold text-[var(--text-primary)]">
-                    {formatRelativeTime(modelFirstSummary.nextWindowResetAt, t)}
+                    {modelFirstSummary.minRemainingFraction === null
+                      ? "-"
+                      : `${Math.round(modelFirstSummary.minRemainingFraction * 100)}%`}
                   </p>
                 </div>
                 <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-2">
