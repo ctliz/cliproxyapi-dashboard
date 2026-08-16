@@ -427,6 +427,21 @@ export async function POST(request: NextRequest) {
       totalStored += result.count;
     }
 
+    // Update lastUsedAt on UserApiKey for keys that had active requests
+    const usedApiKeyIds = Array.from(
+      new Set(
+        candidates
+          .map((c) => c.apiKeyId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+    if (usedApiKeyIds.length > 0) {
+      await prisma.userApiKey.updateMany({
+        where: { id: { in: usedApiKeyIds } },
+        data: { lastUsedAt: new Date() },
+      });
+    }
+
     let latencyBackfilled = 0;
     const latencyBackfillCandidates = buildLatencyBackfillCandidates(candidates);
     for (let i = 0; i < latencyBackfillCandidates.length; i += LATENCY_BACKFILL_BATCH_SIZE) {
