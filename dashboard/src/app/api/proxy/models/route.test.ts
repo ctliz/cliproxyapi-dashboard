@@ -30,6 +30,9 @@ vi.mock("@/lib/db", () => ({
     customProvider: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    modelPreference: {
+      findUnique: vi.fn().mockResolvedValue({ excludedModels: ["hidden-model"] }),
+    },
   },
 }));
 
@@ -58,6 +61,7 @@ describe("GET /api/proxy/models", () => {
     const body = await res.json();
     expect(Array.isArray(body.models)).toBe(true);
     expect(body.models.length).toBeGreaterThan(0);
+    expect(body.models).toContain("hidden-model");
     expect(Array.isArray(body.providers)).toBe(true);
     expect(body.providers.some((p: { id: string }) => p.id === "antigravity")).toBe(true);
   });

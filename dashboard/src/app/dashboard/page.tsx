@@ -231,6 +231,13 @@ export default async function QuickStartPage() {
       }
     }
   }
+  // Keep excluded models visible in the selector so they can be re-enabled.
+  // The proxy catalog may hide native excluded models from /v1/models.
+  for (const model of initialExcludedModels) {
+    if (!availableModelIds.includes(model)) {
+      availableModelIds.push(model);
+    }
+  }
   availableModelIds.sort((a, b) => a.localeCompare(b));
 
   const setupItems = [

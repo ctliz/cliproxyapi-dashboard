@@ -143,7 +143,7 @@ export async function GET() {
     }
 
     // 2. Parallel fetch of management config, auth-files, and custom providers
-    const [managementConfig, authFilesData, customProviders] = await Promise.all([
+    const [managementConfig, authFilesData, customProviders, modelPreference] = await Promise.all([
       fetchManagementJson("config"),
       fetchManagementJson("auth-files"),
       prisma.customProvider.findMany({
@@ -153,6 +153,10 @@ export async function GET() {
         include: {
           models: true,
         },
+      }),
+      prisma.modelPreference.findUnique({
+        where: { userId: session.userId },
+        select: { excludedModels: true },
       }),
     ]);
 
@@ -175,8 +179,12 @@ export async function GET() {
 
     // Fallback to standard models if proxy is completely empty
     const fallbackAll = Object.values(STANDARD_MODELS).flat();
+    // Keep excluded models in the dashboard catalog so users can re-enable them.
     const allModels = Array.from(
-      new Set(liveDiscoveredIds.length > 0 ? liveDiscoveredIds : fallbackAll)
+      new Set([
+        ...(liveDiscoveredIds.length > 0 ? liveDiscoveredIds : fallbackAll),
+        ...(modelPreference?.excludedModels ?? []),
+      ])
     ).sort((a, b) => a.localeCompare(b));
 
     // Build source mapping
