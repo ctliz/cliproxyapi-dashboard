@@ -126,6 +126,10 @@ async function migrate() {
       "name" TEXT NOT NULL DEFAULT 'Default',
       "lastUsedAt" TIMESTAMP(3),
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      "policyEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "allowedModels" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      "fallbackProvider" TEXT,
+      "fallbackModel" TEXT,
       CONSTRAINT "user_api_keys_pkey" PRIMARY KEY ("id")
     );
     CREATE UNIQUE INDEX IF NOT EXISTS "user_api_keys_key_key" ON "user_api_keys"("key");
@@ -134,6 +138,18 @@ async function migrate() {
       ALTER TABLE "user_api_keys" ADD CONSTRAINT "user_api_keys_userId_fkey"
         FOREIGN KEY ("userId") REFERENCES "users"("id") ON DELETE CASCADE;
     EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+    DO $$ BEGIN
+      ALTER TABLE "user_api_keys" ADD COLUMN "policyEnabled" BOOLEAN NOT NULL DEFAULT false;
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    DO $$ BEGIN
+      ALTER TABLE "user_api_keys" ADD COLUMN "allowedModels" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    DO $$ BEGIN
+      ALTER TABLE "user_api_keys" ADD COLUMN "fallbackProvider" TEXT;
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    DO $$ BEGIN
+      ALTER TABLE "user_api_keys" ADD COLUMN "fallbackModel" TEXT;
+    EXCEPTION WHEN duplicate_column THEN NULL; END $$;
 
     -- Config templates table (publishers share their config via share codes)
     CREATE TABLE IF NOT EXISTS "config_templates" (
