@@ -1,79 +1,135 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { ModelSelector } from "@/components/model-selector";
-import { OpenCodeConfigGenerator, type OmoVariant } from "@/components/opencode-config-generator";
-import { OhMyOpenCodeConfigGenerator } from "@/components/oh-my-opencode-config-generator";
-import { OhMyOpenCodeSlimConfigGenerator } from "@/components/oh-my-opencode-slim-config-generator";
-import type { OhMyOpenCodeFullConfig } from "@/lib/config-generators/oh-my-opencode-types";
-import type { OhMyOpenCodeSlimFullConfig } from "@/lib/config-generators/oh-my-opencode-slim-types";
-
-interface OAuthAccountEntry {
-  id: string;
-  name: string;
-  type?: string;
-  provider?: string;
-  disabled?: boolean;
-}
-
-interface ConfigData {
-  "gemini-api-key"?: unknown;
-  "claude-api-key"?: unknown;
-  "codex-api-key"?: unknown;
-  "openai-compatibility"?: unknown;
-  "oauth-model-alias"?: unknown;
-}
-
-interface ModelDefinitionLike {
-  name: string;
-  context: number;
-  output: number;
-  attachment: boolean;
-  reasoning: boolean;
-  modalities: { input: string[]; output: string[] };
-  options?: Record<string, unknown>;
-}
+import { CopyBlock } from "@/components/copy-block";
 
 interface QuickStartConfigSectionProps {
-   apiKeys: { key: string; name: string | null }[];
-   config: unknown;
-   oauthAccounts: OAuthAccountEntry[];
-   availableModels: string[];
-   allModels: Record<string, ModelDefinitionLike>;
-   modelSourceMap: Map<string, string>;
-   modelProvidersMap?: Map<string, string[]>;
-   initialExcludedModels: string[];
-   agentOverrides?: OhMyOpenCodeFullConfig;
-   slimOverrides?: OhMyOpenCodeSlimFullConfig;
-   hasSyncActive: boolean;
-   isSubscribed?: boolean;
-   proxyUrl: string;
- }
+  apiKeys: { key: string; name: string | null }[];
+  availableModels: string[];
+  modelSourceMap: Map<string, string>;
+  modelProvidersMap?: Map<string, string[]>;
+  initialExcludedModels: string[];
+  isSubscribed?: boolean;
+  proxyUrl: string;
+}
+
+type TabType = "curl" | "python" | "node" | "claude";
 
 export function QuickStartConfigSection({
-   apiKeys,
-   config,
-   oauthAccounts,
-   availableModels,
-   allModels,
-   modelSourceMap,
-   initialExcludedModels,
-   agentOverrides,
-   slimOverrides,
-   modelProvidersMap,
-   hasSyncActive,
-   isSubscribed = false,
-   proxyUrl,
- }: QuickStartConfigSectionProps) {
-  const [excludedModels, setExcludedModels] = useState<string[]>(initialExcludedModels);
-  const [omoVariant, setOmoVariant] = useState<OmoVariant>("normal");
-
+  apiKeys,
+  availableModels,
+  modelSourceMap,
+  modelProvidersMap,
+  initialExcludedModels,
+  isSubscribed = false,
+  proxyUrl,
+}: QuickStartConfigSectionProps) {
   const t = useTranslations("quickStartConfig");
+  const [excludedModels, setExcludedModels] = useState<string[]>(initialExcludedModels);
+  const [activeTab, setActiveTab] = useState<TabType>("curl");
+  const [selectedApiKey, setSelectedApiKey] = useState<string>(
+    apiKeys[0]?.key ?? "your-api-key"
+  );
+
+  // Filter out globally excluded models
+  const activeModels = useMemo(() => {
+    const excludedSet = new Set(excludedModels);
+    return availableModels.filter((m) => !excludedSet.has(m));
+  }, [availableModels, excludedModels]);
+
+  const exampleModel = useMemo(() => {
+    if (activeModels.length === 0) return "gpt-5.6-luna";
+    const preferred = [
+      "gpt-5.6-luna",
+      "gemini-3.7-flash-high",
+      "claude-3-7-sonnet",
+      "gpt-4o",
+      "gemini-2.5-flash",
+    ];
+    for (const p of preferred) {
+      if (activeModels.includes(p)) return p;
+    }
+    return activeModels[0];
+  }, [activeModels]);
+
+  const claudeDefaultModel = useMemo(() => {
+    if (activeModels.includes("gemini-2.5-flash")) return "gemini-2.5-flash";
+    if (activeModels.includes("claude-3-7-sonnet")) return "claude-3-7-sonnet";
+    return exampleModel;
+  }, [activeModels, exampleModel]);
+
+  const normalizedProxyUrl = useMemo(() => {
+    return proxyUrl.replace(/\/+$/, "");
+  }, [proxyUrl]);
+
+  const curlCode = useMemo(() => {
+    return `curl ${normalizedProxyUrl}/v1/chat/completions \\
+  -H "Content-Type: application/json" \\
+  -H "Authorization: Bearer ${selectedApiKey}" \\
+  -d '{
+    "model": "${exampleModel}",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Hello CLIProxyAPI!"
+      }
+    ]
+  }'`;
+  }, [normalizedProxyUrl, selectedApiKey, exampleModel]);
+
+  const pythonCode = useMemo(() => {
+    return `from openai import OpenAI
+
+client = OpenAI(
+    base_url="${normalizedProxyUrl}/v1",
+    api_key="${selectedApiKey}",
+)
+
+response = client.chat.completions.create(
+    model="${exampleModel}",
+    messages=[
+        {"role": "user", "content": "Hello CLIProxyAPI!"}
+    ],
+)
+
+print(response.choices[0].message.content)`;
+  }, [normalizedProxyUrl, selectedApiKey, exampleModel]);
+
+  const nodeCode = useMemo(() => {
+    return `import OpenAI from "openai";
+
+const openai = new OpenAI({
+  baseURL: "${normalizedProxyUrl}/v1",
+  apiKey: "${selectedApiKey}",
+});
+
+async function main() {
+  const completion = await openai.chat.completions.create({
+    model: "${exampleModel}",
+    messages: [
+      { role: "user", content: "Hello CLIProxyAPI!" }
+    ],
+  });
+
+  console.log(completion.choices[0].message.content);
+}
+
+main();`;
+  }, [normalizedProxyUrl, selectedApiKey, exampleModel]);
+
+  const claudeCode = useMemo(() => {
+    return `export ANTHROPIC_BASE_URL="${normalizedProxyUrl}"
+export ANTHROPIC_AUTH_TOKEN="${selectedApiKey}"
+export ANTHROPIC_DEFAULT_SONNET_MODEL="${claudeDefaultModel}"
+claude`;
+  }, [normalizedProxyUrl, selectedApiKey, claudeDefaultModel]);
+
   return (
-    <>
+    <div className="space-y-4">
       {availableModels.length > 0 && (
         <section id="model-selection" className="scroll-mt-24">
           <ModelSelector
@@ -87,125 +143,173 @@ export function QuickStartConfigSection({
         </section>
       )}
 
-      <section id="generate-config" className="scroll-mt-24">
+      <section id="client-integration" className="scroll-mt-24">
         <Card>
-        <CardHeader>
-          <CardTitle>
-            <span className="flex items-center gap-3">
-             <span className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]" aria-hidden="true">&#9654;</span>
-               {t("usingWithOpenCode")}
-            </span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <p className="text-sm text-[var(--text-secondary)]">
-              {hasSyncActive ? (
-                <span>{t("configAutoSyncsPrefix")} <code className="rounded bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-xs text-blue-600">opencode-cliproxyapi-sync@latest</code> {t("configAutoSyncsSuffix")}</span>
-              ) : (
-                <span>{t("placeAtPrefix")} <code className="break-all rounded bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-xs text-amber-700">~/.config/opencode/opencode.json</code> {t("placeAtSuffix")}</span>
-              )}
-            </p>
+          <CardHeader>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>
+                <span className="flex items-center gap-3">
+                  <span
+                    className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]"
+                    aria-hidden="true"
+                  >
+                    &#9654;
+                  </span>
+                  {t("clientIntegrationTitle")}
+                </span>
+              </CardTitle>
 
-            {omoVariant === "slim" && (
-              <div className="rounded-md border border-red-500/20 bg-red-500/10 px-3 py-2 space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-semibold text-red-600 shrink-0">{t("firstTimeSetup")}</span>
-                  <code className="text-xs font-mono select-all truncate text-red-600">
-                    bunx oh-my-opencode-slim@latest install --no-tui --skills=no
-                  </code>
-                  <span className="text-[10px] text-red-600/70 shrink-0">{t("runOnce")}</span>
+              {apiKeys.length > 1 && (
+                <div className="flex items-center gap-2 text-xs">
+                  <label
+                    htmlFor="preview-api-key-select"
+                    className="text-[var(--text-muted)] shrink-0"
+                  >
+                    {t("selectActiveKeyLabel")}
+                  </label>
+                  <select
+                    id="preview-api-key-select"
+                    value={selectedApiKey}
+                    onChange={(e) => setSelectedApiKey(e.target.value)}
+                    className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] px-2 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {apiKeys.map((k) => (
+                      <option key={k.key} value={k.key}>
+                        {k.name
+                          ? `${k.name} (${k.key.slice(0, 10)}...)`
+                          : `${k.key.slice(0, 12)}...`}
+                      </option>
+                    ))}
+                  </select>
                 </div>
-                <p className="text-[10px] text-red-600/50">
-                  {t("registersAgentsPrefix")} <code className="text-red-600/60">--skills=yes</code> {t("registersAgentsSuffix")}
+              )}
+            </div>
+            <p className="mt-1 text-xs text-[var(--text-muted)]">
+              {t("clientIntegrationDesc")}
+            </p>
+          </CardHeader>
+
+          <CardContent className="space-y-4">
+            {/* Endpoints & Auth Bar */}
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)]/50 p-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  {t("endpointOpenAILabel")}
+                </span>
+                <p className="mt-0.5 font-mono text-xs text-blue-600 break-all">
+                  {normalizedProxyUrl}/v1
                 </p>
               </div>
-            )}
-
-            <OpenCodeConfigGenerator
-               apiKeys={apiKeys}
-               config={config as ConfigData | null}
-               oauthAccounts={oauthAccounts}
-               models={allModels as Record<string, import("@/lib/config-generators/opencode").ModelDefinition>}
-               excludedModels={excludedModels}
-               proxyUrl={proxyUrl}
-               onVariantChange={setOmoVariant}
-              />
-
-            <div className="space-y-1.5 text-sm text-[var(--text-secondary)]">
-              <p className="flex items-start gap-2">
-                <span className="text-[var(--text-secondary)]">•</span>
-                <span>{t("addProvidersPrefix")} <Link href="/dashboard/providers" className="font-medium text-blue-600 underline decoration-blue-400/30 underline-offset-2 hover:text-blue-800">{t("addProvidersLink")}</Link></span>
-              </p>
-              <p className="flex items-start gap-2">
-                <span className="text-[var(--text-secondary)]">•</span>
-                <span>{t("setDefaultModel")} <code className="break-all rounded bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-xs text-amber-700">cliproxyapi/model-name</code></span>
-              </p>
+              <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)]/50 p-2.5">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
+                  {t("endpointAnthropicLabel")}
+                </span>
+                <p className="mt-0.5 font-mono text-xs text-amber-700 break-all">
+                  {normalizedProxyUrl}
+                </p>
+              </div>
             </div>
 
-            <div className="flex items-start gap-3 rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] p-3">
-              <p className="text-sm text-[var(--text-secondary)]">
-                {t("autoSyncPrefix")} <Link href="/dashboard/settings" className="font-medium text-blue-600 underline decoration-blue-400/30 underline-offset-2 hover:text-blue-800">{t("autoSyncSettings")}</Link>{t("autoSyncMiddle")} <code className="rounded bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-xs text-blue-600">opencode-cliproxyapi-sync@latest</code>
-              </p>
+            {/* Language & Tool Tabs */}
+            <div className="flex border-b border-[var(--surface-border)]">
+              <button
+                type="button"
+                onClick={() => setActiveTab("curl")}
+                className={`border-b-2 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "curl"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {t("tabCurl")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("python")}
+                className={`border-b-2 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "python"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {t("tabPython")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("node")}
+                className={`border-b-2 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "node"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {t("tabNode")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("claude")}
+                className={`border-b-2 px-3 py-1.5 text-xs font-semibold transition-colors ${
+                  activeTab === "claude"
+                    ? "border-blue-600 text-blue-600"
+                    : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                }`}
+              >
+                {t("tabClaudeCode")}
+              </button>
             </div>
-           </div>
-         </CardContent>
-       </Card>
+
+            {/* Code Snippet Box */}
+            <div>
+              {activeTab === "curl" && <CopyBlock code={curlCode} />}
+              {activeTab === "python" && <CopyBlock code={pythonCode} />}
+              {activeTab === "node" && <CopyBlock code={nodeCode} />}
+              {activeTab === "claude" && <CopyBlock code={claudeCode} />}
+            </div>
+
+            {/* Hints & Policy Links */}
+            <div className="space-y-2 text-xs text-[var(--text-secondary)]">
+              <p className="flex items-start gap-2">
+                <span className="text-blue-600 shrink-0">•</span>
+                <span>
+                  {t("apiKeyNoticePrefix")}{" "}
+                  <Link
+                    href="/dashboard/api-keys"
+                    className="font-medium text-blue-600 underline decoration-blue-400/30 underline-offset-2 hover:text-blue-800"
+                  >
+                    {t("apiKeyNoticeLink")}
+                  </Link>{" "}
+                  {t("apiKeyNoticeSuffix")}
+                </span>
+              </p>
+              <p className="flex items-start gap-2">
+                <span className="text-emerald-600 shrink-0">•</span>
+                <span>
+                  {t("tipModelPolicyPrefix")}{" "}
+                  <Link
+                    href="/dashboard/api-keys"
+                    className="font-medium text-blue-600 underline decoration-blue-400/30 underline-offset-2 hover:text-blue-800"
+                  >
+                    {t("tipModelPolicyLink")}
+                  </Link>
+                  {t("tipModelPolicySuffix")}
+                </span>
+              </p>
+              {excludedModels.length > 0 && (
+                <p className="flex items-start gap-2">
+                  <span className="text-amber-600 shrink-0">•</span>
+                  <span>
+                    {t("tipGlobalFilterPrefix")}{" "}
+                    <code className="rounded bg-[var(--surface-muted)] px-1 py-0.5 font-mono text-[11px] text-amber-700">
+                      /v1/models
+                    </code>{" "}
+                    {t("tipGlobalFilterSuffix")} ({excludedModels.length} excluded)
+                  </span>
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
       </section>
-
-      {omoVariant === "normal" && (
-        <>
-          <section id="assignments" className="scroll-mt-24">
-            <details className="group/details rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]" open={false}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                <span className="flex items-center gap-3 text-sm font-semibold text-[var(--text-primary)]">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]" aria-hidden="true">&#9654;</span>
-                  {t("advancedConfigNormal")}
-                </span>
-                <span className="text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] transition-transform duration-200 group-open/details:rotate-180">&#8964;</span>
-              </summary>
-              <div className="border-t border-[var(--surface-border)] px-4 py-3">
-                <OhMyOpenCodeConfigGenerator
-                  apiKeys={apiKeys}
-                  config={config as ConfigData | null}
-                  oauthAccounts={oauthAccounts}
-                  proxyModelIds={availableModels}
-                  excludedModels={excludedModels}
-                  agentOverrides={agentOverrides}
-                  modelSourceMap={modelSourceMap}
-                />
-              </div>
-            </details>
-          </section>
-        </>
-      )}
-
-      {omoVariant === "slim" && (
-        <>
-          <section id="assignments-slim" className="scroll-mt-24">
-            <details className="group/details rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]" open={false}>
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-                <span className="flex items-center gap-3 text-sm font-semibold text-[var(--text-primary)]">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md border border-[var(--surface-border)] bg-[var(--surface-muted)] text-sm text-[var(--text-secondary)]" aria-hidden="true">&#9654;</span>
-                  {t("advancedConfigSlim")}
-                </span>
-                <span className="text-xs font-medium uppercase tracking-[0.1em] text-[var(--text-muted)] transition-transform duration-200 group-open/details:rotate-180">&#8964;</span>
-              </summary>
-              <div className="border-t border-[var(--surface-border)] px-4 py-3">
-                <OhMyOpenCodeSlimConfigGenerator
-                  apiKeys={apiKeys}
-                  config={config as ConfigData | null}
-                  oauthAccounts={oauthAccounts}
-                  proxyModelIds={availableModels}
-                  excludedModels={excludedModels}
-                  slimOverrides={slimOverrides}
-                  modelSourceMap={modelSourceMap}
-                />
-              </div>
-            </details>
-          </section>
-        </>
-      )}
-    </>
+    </div>
   );
 }

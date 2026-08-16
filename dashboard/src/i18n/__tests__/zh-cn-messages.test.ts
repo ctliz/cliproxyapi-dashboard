@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import en from "../../../messages/en.json";
 import zhCN from "../../../messages/zh-CN.json";
+import de from "../../../messages/de.json";
+import es from "../../../messages/es.json";
 
 function flattenMessages(
   value: Record<string, unknown>,
@@ -32,20 +34,58 @@ function placeholders(message: string): string[] {
     .sort();
 }
 
-describe("Simplified Chinese messages", () => {
+describe("Translation messages parity with English", () => {
   const english = flattenMessages(en);
-  const chinese = flattenMessages(zhCN);
 
-  it("matches the complete English message structure", () => {
-    expect([...chinese.keys()].sort()).toEqual([...english.keys()].sort());
+  describe("Simplified Chinese (zh-CN)", () => {
+    const chinese = flattenMessages(zhCN);
+
+    it("matches the complete English message structure", () => {
+      expect([...chinese.keys()].sort()).toEqual([...english.keys()].sort());
+    });
+
+    it("preserves every interpolation placeholder", () => {
+      for (const [path, englishMessage] of english) {
+        if (englishMessage === "__namespace__") continue;
+        expect(placeholders(chinese.get(path) ?? ""), path).toEqual(
+          placeholders(englishMessage),
+        );
+      }
+    });
   });
 
-  it("preserves every interpolation placeholder", () => {
-    for (const [path, englishMessage] of english) {
-      if (englishMessage === "__namespace__") continue;
-      expect(placeholders(chinese.get(path) ?? ""), path).toEqual(
-        placeholders(englishMessage),
-      );
-    }
+  describe("German (de)", () => {
+    const german = flattenMessages(de);
+
+    it("matches the complete English message structure", () => {
+      expect([...german.keys()].sort()).toEqual([...english.keys()].sort());
+    });
+
+    it("preserves every interpolation placeholder", () => {
+      for (const [path, englishMessage] of english) {
+        if (englishMessage === "__namespace__") continue;
+        expect(placeholders(german.get(path) ?? ""), path).toEqual(
+          placeholders(englishMessage),
+        );
+      }
+    });
+  });
+
+  describe("Spanish (es)", () => {
+    const spanish = flattenMessages(es);
+
+    it("matches the complete English message structure", () => {
+      expect([...spanish.keys()].sort()).toEqual([...english.keys()].sort());
+    });
+
+    it("preserves every interpolation placeholder", () => {
+      for (const [path, englishMessage] of english) {
+        if (englishMessage === "__namespace__") continue;
+        expect(placeholders(spanish.get(path) ?? ""), path).toEqual(
+          placeholders(englishMessage),
+        );
+      }
+    });
   });
 });
+

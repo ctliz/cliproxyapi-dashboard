@@ -1,19 +1,21 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { CopyBlock } from "@/components/copy-block";
 import { QuickStartConfigSection } from "@/components/quick-start-config-section";
 import { ConfigPublisher } from "@/components/config-publisher";
 import { ConfigSubscriber } from "@/components/config-subscriber";
 import { verifySession } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
-import type { OhMyOpenCodeFullConfig } from "@/lib/config-generators/oh-my-opencode-types";
-import { validateSlimConfig, type OhMyOpenCodeSlimFullConfig } from "@/lib/config-generators/oh-my-opencode-slim-types";
 import { buildAvailableModelIds, fetchProxyModels } from "@/lib/config-generators/shared";
-import { getProxyUrl, getInternalProxyUrl, buildAvailableModelsFromProxy, extractOAuthModelAliases, fetchModelsDevLimits, inferModelDefinition } from "@/lib/config-generators/opencode";
+import {
+  getProxyUrl,
+  getInternalProxyUrl,
+  extractOAuthModelAliases,
+  fetchModelsDevLimits,
+} from "@/lib/config-generators/opencode";
 import type { ConfigData } from "@/lib/config-generators/shared";
 import { resolveOwnedByDisplay } from "@/lib/providers/model-grouping";
 import { LazyDashboardMiniCharts } from "@/components/lazy-dashboard-mini-charts";
-import { getTranslations } from 'next-intl/server';
+import { getTranslations } from "next-intl/server";
 
 interface ManagementFetchParams {
   path: string;
@@ -50,14 +52,6 @@ async function getServiceHealth() {
   }
 }
 
-function getClaudeCodeEnv(): string {
-  return `export ANTHROPIC_BASE_URL=${getProxyUrl()}
-export ANTHROPIC_AUTH_TOKEN=your-api-key
-export ANTHROPIC_DEFAULT_SONNET_MODEL=gemini-2.5-flash`;
-}
-
-
-
 interface OAuthAccountEntry {
   id: string;
   name: string;
@@ -72,8 +66,9 @@ function extractOAuthAccounts(data: unknown): OAuthAccountEntry[] {
   const files = record["files"];
   if (!Array.isArray(files)) return [];
   return files
-    .filter((entry): entry is Record<string, unknown> =>
-      typeof entry === "object" && entry !== null && "name" in entry
+    .filter(
+      (entry): entry is Record<string, unknown> =>
+        typeof entry === "object" && entry !== null && "name" in entry,
     )
     .map((entry) => ({
       id: typeof entry.id === "string" ? entry.id : String(entry.name),
@@ -84,7 +79,9 @@ function extractOAuthAccounts(data: unknown): OAuthAccountEntry[] {
     }));
 }
 
-function buildSourceMap(proxyModels: { id: string; owned_by: string }[]): Map<string, string> {
+function buildSourceMap(
+  proxyModels: { id: string; owned_by: string }[],
+): Map<string, string> {
   const sourceMap = new Map<string, string>();
   for (const m of proxyModels) {
     sourceMap.set(m.id, resolveOwnedByDisplay(m.owned_by));
@@ -92,7 +89,9 @@ function buildSourceMap(proxyModels: { id: string; owned_by: string }[]): Map<st
   return sourceMap;
 }
 
-function buildProvidersMap(proxyModels: { id: string; owned_by: string }[]): Map<string, string[]> {
+function buildProvidersMap(
+  proxyModels: { id: string; owned_by: string }[],
+): Map<string, string[]> {
   const map = new Map<string, string[]>();
   for (const m of proxyModels) {
     const display = resolveOwnedByDisplay(m.owned_by);
@@ -105,7 +104,7 @@ function buildProvidersMap(proxyModels: { id: string; owned_by: string }[]): Map
 }
 
 export default async function QuickStartPage() {
-  const t = await getTranslations('dashboard');
+  const t = await getTranslations("dashboard");
 
   const [config, isHealthy, oauthData, session] = await Promise.all([
     fetchManagementJson({ path: "config" }),
@@ -114,16 +113,16 @@ export default async function QuickStartPage() {
     verifySession(),
   ]);
 
-  const [modelPreference, agentOverride, activeSyncTokens, publishStatus, subscribeStatus, userApiKeys] = session
+  const [
+    modelPreference,
+    publishStatus,
+    subscribeStatus,
+    userApiKeys,
+  ] = session
     ? await Promise.all([
         prisma.modelPreference.findUnique({ where: { userId: session.userId } }),
-        prisma.agentModelOverride.findUnique({ where: { userId: session.userId } }),
-        prisma.syncToken.findMany({
-          where: { userId: session.userId },
-          select: { id: true },
-        }),
         prisma.configTemplate.findUnique({ where: { userId: session.userId } }),
-        prisma.configSubscription.findUnique({ 
+        prisma.configSubscription.findUnique({
           where: { userId: session.userId },
           include: { template: true },
         }),
@@ -132,45 +131,29 @@ export default async function QuickStartPage() {
           select: { id: true, key: true, name: true },
         }),
       ])
-    : [null, null, [], null, null, []];
-  const hasSyncActive = activeSyncTokens.length > 0;
+    : [null, null, null, []];
+
   const hasApiKey = userApiKeys.length > 0;
   const isPublisher = publishStatus !== null;
-  const isSubscriber = subscribeStatus !== null && subscribeStatus.isActive && subscribeStatus.template?.isActive;
+  const isSubscriber =
+    subscribeStatus !== null &&
+    subscribeStatus.isActive &&
+    subscribeStatus.template?.isActive;
 
   // Load publisher's config if user is an active subscriber
   let publisherModelPreference = null;
-  let publisherAgentOverride = null;
   if (isSubscriber && subscribeStatus?.template) {
     const publisherId = subscribeStatus.template.userId;
-    [publisherModelPreference, publisherAgentOverride] = await Promise.all([
+    [publisherModelPreference] = await Promise.all([
       prisma.modelPreference.findUnique({ where: { userId: publisherId } }),
-      prisma.agentModelOverride.findUnique({ where: { userId: publisherId } }),
     ]);
   }
 
   // Use publisher's excluded models if subscribed, otherwise own
-  const initialExcludedModels = isSubscriber && publisherModelPreference
-    ? publisherModelPreference.excludedModels
-    : (modelPreference?.excludedModels ?? []);
-  
-  // Use publisher's overrides for model selection, but keep subscriber's MCPs
-  const publisherOverrides = (publisherAgentOverride?.overrides ?? {}) as OhMyOpenCodeFullConfig;
-  const subscriberOverrides = (agentOverride?.overrides ?? {}) as OhMyOpenCodeFullConfig;
-  const agentOverrides: OhMyOpenCodeFullConfig = isSubscriber
-    ? { ...publisherOverrides, mcpServers: subscriberOverrides.mcpServers, customPlugins: subscriberOverrides.customPlugins }
-    : subscriberOverrides;
-
-  // Slim overrides — validate from DB, subscriber inherits publisher's if non-empty
-  const publisherSlimOverrides = publisherAgentOverride?.slimOverrides
-    ? validateSlimConfig(publisherAgentOverride.slimOverrides)
-    : {};
-  const subscriberSlimOverrides = agentOverride?.slimOverrides
-    ? validateSlimConfig(agentOverride.slimOverrides)
-    : {};
-  const slimOverrides: OhMyOpenCodeSlimFullConfig = isSubscriber && Object.keys(publisherSlimOverrides).length > 0
-    ? publisherSlimOverrides
-    : subscriberSlimOverrides;
+  const initialExcludedModels =
+    isSubscriber && publisherModelPreference
+      ? publisherModelPreference.excludedModels
+      : modelPreference?.excludedModels ?? [];
 
   const apiKeys = userApiKeys.map((k) => ({ key: k.key, name: k.name }));
   const oauthAccounts = extractOAuthAccounts(oauthData);
@@ -201,33 +184,39 @@ export default async function QuickStartPage() {
   const [firstUserApiKey] = userApiKeys;
   const apiKeyForProxy = firstUserApiKey?.key ?? "";
   const [proxyModels, modelsDevLimits, customProviders] = await Promise.all([
-    apiKeyForProxy ? fetchProxyModels(getInternalProxyUrl(), apiKeyForProxy) : Promise.resolve([]),
+    apiKeyForProxy
+      ? fetchProxyModels(getInternalProxyUrl(), apiKeyForProxy)
+      : Promise.resolve([]),
     fetchModelsDevLimits(),
     session
       ? prisma.customProvider.findMany({
           where: {
-            OR: [
-              { userId: session.userId },
-              { isShared: true }
-            ]
+            OR: [{ userId: session.userId }, { isShared: true }],
           },
           include: { models: true },
           orderBy: { sortOrder: "asc" },
         })
       : Promise.resolve([]),
   ]);
-  const oauthAliasModels = extractOAuthModelAliases(config as ConfigData | null, oauthAccounts, modelsDevLimits);
+
+  const oauthAliasModels = extractOAuthModelAliases(
+    config as ConfigData | null,
+    oauthAccounts,
+    modelsDevLimits,
+  );
   const oauthAliasIds = Object.keys(oauthAliasModels);
   const availableModelIds = buildAvailableModelIds(proxyModels, oauthAliasIds);
   const modelSourceMap = buildSourceMap(proxyModels);
   const modelProvidersMap = buildProvidersMap(proxyModels);
+
   for (const aliasId of oauthAliasIds) {
-    modelSourceMap.set(aliasId, t('modelSourceOAuthAlias'));
+    modelSourceMap.set(aliasId, t("modelSourceOAuthAlias"));
     const existing = modelProvidersMap.get(aliasId) ?? [];
     if (!existing.includes("OAuth Alias")) {
       modelProvidersMap.set(aliasId, [...existing, "OAuth Alias"]);
     }
   }
+
   for (const cp of customProviders) {
     const label = cp.name;
     for (const m of cp.models) {
@@ -243,33 +232,25 @@ export default async function QuickStartPage() {
     }
   }
   availableModelIds.sort((a, b) => a.localeCompare(b));
-  const allProxyModels = { ...oauthAliasModels, ...buildAvailableModelsFromProxy(proxyModels, modelsDevLimits) };
-  for (const cp of customProviders) {
-    for (const m of cp.models) {
-      if (!(m.alias in allProxyModels)) {
-        const def = inferModelDefinition(m.upstreamName, cp.providerId, modelsDevLimits);
-        allProxyModels[m.alias] = { ...def, name: `${m.alias} (via ${cp.name})` };
-      }
-    }
-  }
+
   const setupItems = [
     {
-      label: t('setupProviderConnectedLabel'),
+      label: t("setupProviderConnectedLabel"),
       done: providerCount > 0,
       link: "/dashboard/providers",
-      linkLabel: t('setupProviderConnectedLink'),
+      linkLabel: t("setupProviderConnectedLink"),
     },
     {
-      label: t('setupApiKeyCreatedLabel'),
+      label: t("setupApiKeyCreatedLabel"),
       done: apiKeys.length > 0,
       link: "/dashboard/api-keys",
-      linkLabel: t('setupApiKeyCreatedLink'),
+      linkLabel: t("setupApiKeyCreatedLink"),
     },
     {
-      label: t('setupModelCatalogLabel'),
+      label: t("setupModelCatalogLabel"),
       done: availableModelIds.length > 0,
       link: "/dashboard/providers",
-      linkLabel: t('setupModelCatalogLink'),
+      linkLabel: t("setupModelCatalogLink"),
     },
   ];
   const completedSetupItems = setupItems.filter((item) => item.done).length;
@@ -279,30 +260,31 @@ export default async function QuickStartPage() {
   if (shouldShowSetupChecklist && process.env.SKIP_SETUP_WIZARD !== "true") {
     redirect("/dashboard/setup");
   }
+
   const statusCards = [
     {
-      label: t('statusServiceLabel'),
-      value: isHealthy ? t('statusOnline') : t('statusOffline'),
+      label: t("statusServiceLabel"),
+      value: isHealthy ? t("statusOnline") : t("statusOffline"),
       tone: isHealthy ? "text-emerald-600" : "text-rose-600",
       icon: "●",
       iconTone: isHealthy ? "text-emerald-700" : "text-rose-600",
     },
     {
-      label: t('statusProvidersLabel'),
-      value: t('statusProvidersValue', { count: providerCount }),
+      label: t("statusProvidersLabel"),
+      value: t("statusProvidersValue", { count: providerCount }),
       tone: "text-[var(--text-primary)]",
       icon: "◆",
       iconTone: "text-blue-600",
     },
     {
-      label: t('statusApiKeysLabel'),
-      value: t('statusApiKeysValue', { count: apiKeys.length }),
+      label: t("statusApiKeysLabel"),
+      value: t("statusApiKeysValue", { count: apiKeys.length }),
       tone: "text-[var(--text-primary)]",
       icon: "♟",
       iconTone: "text-amber-700",
     },
     {
-      label: t('statusProxyUrlLabel'),
+      label: t("statusProxyUrlLabel"),
       value: getProxyUrl(),
       tone: "text-[var(--text-primary)]",
       icon: "◈",
@@ -313,12 +295,15 @@ export default async function QuickStartPage() {
 
   return (
     <div className="space-y-4">
+      {/* Top Banner / Navigation */}
       <section className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-4">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">{t('quickStartTitle')}</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-[var(--text-primary)]">
+              {t("quickStartTitle")}
+            </h1>
             <p className="mt-1 text-sm text-[var(--text-muted)]">
-              Configure providers, generate client config, and validate access from one place.
+              {t("pageDescription")}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -326,33 +311,58 @@ export default async function QuickStartPage() {
               href="/dashboard/providers"
               className="rounded-md border border-[var(--surface-border)]/80 bg-[var(--surface-muted)]/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]/80"
             >
-              {t('navProviders')}
+              {t("navProviders")}
             </Link>
             <Link
               href="/dashboard/api-keys"
               className="rounded-md border border-[var(--surface-border)]/80 bg-[var(--surface-muted)]/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]/80"
             >
-              {t('navApiKeys')}
+              {t("navApiKeys")}
+            </Link>
+            <Link
+              href="/dashboard/usage"
+              className="rounded-md border border-[var(--surface-border)]/80 bg-[var(--surface-muted)]/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]/80"
+            >
+              {t("navUsage")}
+            </Link>
+            <Link
+              href="/dashboard/quota"
+              className="rounded-md border border-[var(--surface-border)]/80 bg-[var(--surface-muted)]/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]/80"
+            >
+              {t("navQuota")}
             </Link>
             <Link
               href="/dashboard/settings"
               className="rounded-md border border-[var(--surface-border)]/80 bg-[var(--surface-muted)]/70 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.1em] text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-hover)]/80"
             >
-              {t('navSettings')}
+              {t("navSettings")}
             </Link>
           </div>
         </div>
       </section>
 
+      {/* Status Cards */}
       <section id="overview" className="scroll-mt-24">
         <div className="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-2">
           {statusCards.map((card) => (
-            <div key={card.label} className="glass-card rounded-md border border-[var(--surface-border)] px-2.5 py-2 transition-colors hover:border-[var(--surface-border)]">
+            <div
+              key={card.label}
+              className="glass-card rounded-md border border-[var(--surface-border)] px-2.5 py-2 transition-colors hover:border-[var(--surface-border)]"
+            >
               <div className="flex items-center justify-between">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">{card.label}</div>
-                <span className={`text-xs ${card.iconTone}`} aria-hidden="true">{card.icon}</span>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--text-muted)]">
+                  {card.label}
+                </div>
+                <span className={`text-xs ${card.iconTone}`} aria-hidden="true">
+                  {card.icon}
+                </span>
               </div>
-              <div className={`mt-0.5 text-xs font-semibold ${card.tone} ${"truncate" in card && card.truncate ? "truncate" : ""}`} title={String(card.value)}>
+              <div
+                className={`mt-0.5 text-xs font-semibold ${card.tone} ${
+                  "truncate" in card && card.truncate ? "truncate" : ""
+                }`}
+                title={String(card.value)}
+              >
                 {card.value}
               </div>
             </div>
@@ -360,68 +370,124 @@ export default async function QuickStartPage() {
         </div>
       </section>
 
+      {/* Usage Sparkline Mini-Charts */}
       <LazyDashboardMiniCharts />
 
+      {/* Three Core Guidance Cards */}
+      <section id="guide-cards" className="grid grid-cols-1 gap-3 md:grid-cols-3">
+        {/* Global Model Filtering */}
+        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-blue-500/20 bg-blue-500/10 text-xs text-blue-600 font-bold">
+                ⚑
+              </span>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                {t("guideModelFilterTitle")}
+              </h2>
+            </div>
+            <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
+              {t("guideModelFilterDesc")}
+            </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[var(--surface-border)]">
+            <Link
+              href="/dashboard/api-keys"
+              className="inline-flex items-center text-xs font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              {t("guideModelFilterLink")} &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {/* Account Usage & Quotas */}
+        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-amber-500/20 bg-amber-500/10 text-xs text-amber-600 font-bold">
+                ◷
+              </span>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                {t("guideAccountStatsTitle")}
+              </h2>
+            </div>
+            <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
+              {t("guideAccountStatsDesc")}
+            </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[var(--surface-border)]">
+            <Link
+              href="/dashboard/quota"
+              className="inline-flex items-center text-xs font-medium text-amber-600 hover:text-amber-700 dark:text-amber-400 dark:hover:text-amber-300"
+            >
+              {t("guideAccountStatsLink")} &rarr;
+            </Link>
+          </div>
+        </div>
+
+        {/* Model Metrics & Monitoring */}
+        <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="flex h-6 w-6 items-center justify-center rounded-md border border-emerald-500/20 bg-emerald-500/10 text-xs text-emerald-600 font-bold">
+                ∿
+              </span>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)]">
+                {t("guideModelStatsTitle")}
+              </h2>
+            </div>
+            <p className="mt-2 text-xs text-[var(--text-muted)] leading-relaxed">
+              {t("guideModelStatsDesc")}
+            </p>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[var(--surface-border)]">
+            <Link
+              href="/dashboard/usage"
+              className="inline-flex items-center text-xs font-medium text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+            >
+              {t("guideModelStatsLink")} &rarr;
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      {/* Model Selection & Universal Client Integration */}
       <QuickStartConfigSection
         apiKeys={apiKeys}
-        config={config}
-        oauthAccounts={oauthAccounts}
         availableModels={availableModelIds}
-        allModels={allProxyModels}
         modelSourceMap={modelSourceMap}
         modelProvidersMap={modelProvidersMap}
         initialExcludedModels={initialExcludedModels}
-        agentOverrides={agentOverrides}
-        slimOverrides={slimOverrides}
-        hasSyncActive={hasSyncActive}
         isSubscribed={isSubscriber}
         proxyUrl={getProxyUrl()}
       />
 
+      {/* Publisher / Subscriber */}
       <section id="sharing" className="scroll-mt-24">
         <details className="group/details rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]">
           <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
             <div>
-              <p className="text-sm font-semibold text-[var(--text-primary)]">{t('publisherSubscriberTitle')}</p>
-              <p className="text-xs text-[var(--text-muted)]">{t('publisherSubscriberDescription')}</p>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                {t("publisherSubscriberTitle")}
+              </p>
+              <p className="text-xs text-[var(--text-muted)]">
+                {t("publisherSubscriberDescription")}
+              </p>
             </div>
-            <svg className="h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 group-open/details:rotate-180" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
+            <svg
+              className="h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 group-open/details:rotate-180"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
           </summary>
           <div className="grid gap-3 border-t border-[var(--surface-border)] px-4 py-3 2xl:grid-cols-2">
             {!isSubscriber && <ConfigPublisher />}
             {!isPublisher && <ConfigSubscriber hasApiKey={hasApiKey} />}
-          </div>
-        </details>
-      </section>
-
-      <section id="integrations" className="scroll-mt-24">
-        <details className="group/details rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)]">
-          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-primary)]">{t('integrationsTitle')}</p>
-              <p className="text-xs text-[var(--text-muted)]">{t('integrationsDescription')}</p>
-            </div>
-            <svg className="h-4 w-4 text-[var(--text-muted)] transition-transform duration-200 group-open/details:rotate-180" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9" /></svg>
-          </summary>
-          <div className="border-t border-[var(--surface-border)] px-4 py-3">
-            <div className="rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] p-4">
-              <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">
-                <span className="flex items-center gap-3">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md border border-blue-500/20 bg-blue-500/10 text-sm text-blue-600" aria-hidden="true">&#9654;</span>
-                  Using with Claude Code
-                </span>
-              </h3>
-              <p className="mb-4 text-sm text-[var(--text-secondary)]">
-                As an alternative, you can use CLIProxyAPI with Claude Code by setting environment variables before launching it.
-                Replace <code className="break-all rounded bg-[var(--surface-muted)] px-1.5 py-0.5 font-mono text-xs text-blue-600">your-api-key</code> with
-                your key from the{" "}
-                <Link href="/dashboard/api-keys" className="font-medium text-blue-600 underline decoration-blue-400/30 underline-offset-2 hover:text-blue-800">
-                  {t('claudeCodeApiKeysLink')}
-                </Link>{" "}
-                {t('claudeCodePageSuffix')}
-              </p>
-              <CopyBlock code={getClaudeCodeEnv()} />
-            </div>
           </div>
         </details>
       </section>
