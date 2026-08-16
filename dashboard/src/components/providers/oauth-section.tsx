@@ -58,6 +58,14 @@ const OAUTH_PROVIDERS = [
     preConnect: null,
   },
   {
+    id: "xai" as const,
+    name: "xAI",
+    description: "xAI / Grok (device OAuth)",
+    authEndpoint: "/api/management/xai-auth-url?is_webui=true",
+    requiresCallback: false,
+    preConnect: null,
+  },
+  {
     id: "iflow" as const,
     name: "iFlow",
     description: "iFlytek iFlow (via OAuth)",
