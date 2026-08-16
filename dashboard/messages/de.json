@@ -34,7 +34,7 @@
     "sectionGeneral": "Allgemein",
     "sectionAccess": "Zugriff",
     "sectionAdmin": "Administrator",
-    "quickStart": "Schnelleinstieg",
+    "quickStart": "Startseite",
     "providers": "Anbieter",
     "usage": "Nutzung",
     "quota": "Kontingent",
@@ -158,7 +158,7 @@
     "criticalError": "Ein kritischer Fehler ist aufgetreten. Bitte versuchen Sie es erneut oder kehren Sie zum Dashboard zurück."
   },
   "dashboard": {
-    "pageTitle": "Schnellstart",
+    "pageTitle": "Startseite",
     "pageDescription": "CLIProxyAPI Gateway-Leitfaden: Verbinden Sie Clients, konfigurieren Sie globale Modellfilter und überwachen Sie Konto- und Modellstatistiken.",
     "navProviders": "Anbieter",
     "navApiKeys": "API-Schlüssel",
@@ -200,7 +200,7 @@
     "claudeCodeApiKeysLink": "API-Schlüssel",
     "claudeCodePageSuffix": "Seite.",
     "modelSourceOAuthAlias": "OAuth-Alias",
-    "quickStartTitle": "Schnellstart"
+    "quickStartTitle": "Startseite"
   },
   "settings": {
     "password": {
@@ -313,7 +313,7 @@
   "apiKeys": {
     "pageTitle": "API-Schlüssel",
     "pageDescription": "Verwalten Sie Dashboard-Zugriffscodes für Clients und Integrationen.",
-    "pageTooltip": "API-Schlüssel authentifizieren externe Tools (wie das opencode-cliproxyapi-sync-Plugin), um programmatisch auf Ihre Dashboard-Konfiguration zuzugreifen",
+    "pageTooltip": "API-Schlüssel authentifizieren externe Tools und Clients, um programmatisch auf CLIProxyAPI und Ihre Dashboard-Konfiguration zuzugreifen",
     "createKeyButton": "Schlüssel erstellen",
     "loadingText": "Wird geladen...",
     "emptyTitle": "Noch keine API-Schlüssel erstellt",

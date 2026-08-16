@@ -34,7 +34,7 @@
     "sectionGeneral": "General",
     "sectionAccess": "Acceso",
     "sectionAdmin": "Admin",
-    "quickStart": "Inicio Rápido",
+    "quickStart": "Inicio",
     "providers": "Proveedores",
     "usage": "Uso",
     "quota": "Cuota",
@@ -158,7 +158,7 @@
     "criticalError": "Ocurrió un error crítico. Por favor, inténtalo de nuevo o vuelve al panel."
   },
   "dashboard": {
-    "pageTitle": "Inicio Rápido",
+    "pageTitle": "Inicio",
     "pageDescription": "Guía de CLIProxyAPI: conecta clientes, configura exclusión de modelos globales y supervisa estadísticas de cuentas y modelos.",
     "navProviders": "Proveedores",
     "navApiKeys": "Claves API",
@@ -200,7 +200,7 @@
     "claudeCodeApiKeysLink": "Claves API",
     "claudeCodePageSuffix": ".",
     "modelSourceOAuthAlias": "Alias de OAuth",
-    "quickStartTitle": "Inicio Rápido"
+    "quickStartTitle": "Inicio"
   },
   "settings": {
     "password": {
@@ -313,7 +313,7 @@
   "apiKeys": {
     "pageTitle": "Claves API",
     "pageDescription": "Gestiona las claves de acceso al panel para clientes e integraciones.",
-    "pageTooltip": "Las claves API autentican herramientas externas (como el plugin opencode-cliproxyapi-sync) para acceder a la configuración de tu panel programáticamente",
+    "pageTooltip": "Las claves API autentican herramientas externas y clientes para acceder a CLIProxyAPI y la configuración de su panel mediante programación",
     "createKeyButton": "Crear Clave",
     "loadingText": "Cargando...",
     "emptyTitle": "Aún no se han creado claves API",

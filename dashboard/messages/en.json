@@ -34,7 +34,7 @@
     "sectionGeneral": "General",
     "sectionAccess": "Access",
     "sectionAdmin": "Admin",
-    "quickStart": "Quick Start",
+    "quickStart": "Home",
     "providers": "Providers",
     "usage": "Usage",
     "quota": "Quota",
@@ -158,7 +158,7 @@
     "criticalError": "A critical error occurred. Please try again or return to the dashboard."
   },
   "dashboard": {
-    "pageTitle": "Quick Start",
+    "pageTitle": "Home",
     "pageDescription": "CLIProxyAPI unified gateway guide: configure global model exclusions, manage client integrations, and inspect account and model metrics.",
     "navProviders": "Providers",
     "navApiKeys": "API Keys",
@@ -200,7 +200,7 @@
     "claudeCodeApiKeysLink": "API Keys",
     "claudeCodePageSuffix": "page.",
     "modelSourceOAuthAlias": "OAuth Alias",
-    "quickStartTitle": "Quick Start"
+    "quickStartTitle": "Home"
   },
   "settings": {
     "password": {
@@ -313,7 +313,7 @@
   "apiKeys": {
     "pageTitle": "API Keys",
     "pageDescription": "Manage dashboard access keys for clients and integrations.",
-    "pageTooltip": "API keys authenticate external tools (like the opencode-cliproxyapi-sync plugin) to access your dashboard configuration programmatically",
+    "pageTooltip": "API keys authenticate external tools and clients to access CLIProxyAPI and your dashboard configuration programmatically",
     "createKeyButton": "Create Key",
     "loadingText": "Loading...",
     "emptyTitle": "No API keys created yet",

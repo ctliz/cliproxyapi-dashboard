@@ -10,11 +10,11 @@ import { useMobileSidebar } from "@/components/mobile-sidebar-context";
 import { useAuth } from "@/hooks/use-auth";
 import { useFocusTrap } from "@/hooks/use-focus-trap";
 
-function IconPlayCircle({ className }: { className?: string }) {
+function IconHome({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" />
-      <polygon points="10 8 16 12 10 16 10 8" />
+      <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+      <polyline points="9 22 9 12 15 12 15 22" />
     </svg>
   );
 }
@@ -137,7 +137,7 @@ const NAV_SECTIONS = [
 ] as const;
 
 const NAV_ITEMS = [
-  { href: "/dashboard", labelKey: "quickStart", icon: IconPlayCircle, adminOnly: false, section: "general" },
+  { href: "/dashboard", labelKey: "quickStart", icon: IconHome, adminOnly: false, section: "general" },
   { href: "/dashboard/providers", labelKey: "providers", icon: IconLayers, adminOnly: false, section: "general" },
   { href: "/dashboard/usage", labelKey: "usage", icon: IconBarChart, adminOnly: false, section: "general" },
   { href: "/dashboard/quota", labelKey: "quota", icon: IconGauge, adminOnly: false, section: "general" },

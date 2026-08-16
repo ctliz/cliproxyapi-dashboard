@@ -34,7 +34,7 @@
     "sectionGeneral": "常规",
     "sectionAccess": "访问",
     "sectionAdmin": "管理员",
-    "quickStart": "快速入门",
+    "quickStart": "首页",
     "providers": "提供商",
     "usage": "用量",
     "quota": "配额",
@@ -158,7 +158,7 @@
     "criticalError": "发生严重错误。请重试或返回仪表板。"
   },
   "dashboard": {
-    "pageTitle": "快速入门",
+    "pageTitle": "首页",
     "pageDescription": "CLIProxyAPI 统一网关配置与管理指南：快速接入通用客户端、管理全局模型过滤与策略、查看账户用量与模型统计指标。",
     "navProviders": "提供商",
     "navApiKeys": "API 密钥",
@@ -200,7 +200,7 @@
     "claudeCodeApiKeysLink": "API 密钥",
     "claudeCodePageSuffix": "页。",
     "modelSourceOAuthAlias": "OAuth 别名",
-    "quickStartTitle": "快速入门"
+    "quickStartTitle": "首页"
   },
   "settings": {
     "password": {
@@ -313,7 +313,7 @@
   "apiKeys": {
     "pageTitle": "API 密钥",
     "pageDescription": "管理客户端和集成的仪表板访问密钥。",
-    "pageTooltip": "API 密钥对外部工具（如 opencode-cliproxyapi-sync 插件）进行身份验证，以编程方式访问仪表板配置",
+    "pageTooltip": "API 密钥对外部工具和客户端进行身份验证，以编程方式访问 CLIProxyAPI 和仪表板配置",
     "createKeyButton": "创建密钥",
     "loadingText": "加载中...",
     "emptyTitle": "尚未创建 API 密钥",
