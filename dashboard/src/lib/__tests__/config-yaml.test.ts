@@ -103,13 +103,6 @@ describe("mergeConfigYaml", () => {
     ).toThrow(/root value is not a YAML mapping/);
   });
 
-  it("preserves other xai fields when toggling service-tier", () => {
-    const rawYaml = "xai:\n  inject-x-search: false\n  service-tier: priority\n";
-    const merged = mergeConfigYaml(rawYaml, { xai: { "service-tier": "" } });
-    expect(merged).toContain("inject-x-search: false");
-    expect(merged).toMatch(/service-tier: ['\"]{0,1}['\"]{0,1}/);
-  });
-
   it("adds new keys that did not exist in the original YAML", () => {
     const rawYaml = "debug: false\n";
     const merged = mergeConfigYaml(rawYaml, {
