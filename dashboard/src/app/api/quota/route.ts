@@ -116,6 +116,127 @@ interface AntigravityQuotaSnapshot {
   snapshotSource: string;
 }
 
+const XAI_BILLING_ENDPOINTS = [
+  "https://cli-chat-proxy.grok.com/v1/billing?format=credits",
+  "https://cli-chat-proxy.grok.com/v1/billing",
+] as const;
+const XAI_API_ME_URL = "https://api.x.ai/v1/me";
+const XAI_PAID_HEALTH_URL = "https://api.x.ai/v1/chat/completions";
+
+function parseXaiApiCallBody(value: ApiCallResponse): { statusCode: number; body: unknown } {
+  const statusCode = Number(value.status_code ?? value.statusCode ?? 0);
+  let body: unknown = value.body;
+  if (typeof body === "string") {
+    try { body = JSON.parse(body); } catch { /* preserve text */ }
+  }
+  return { statusCode, body };
+}
+
+async function xaiApiCall(
+  authIndex: string,
+  method: "GET" | "POST",
+  url: string,
+  data?: unknown,
+  header: Record<string, string> = {
+    Authorization: "Bearer $TOKEN$",
+    Accept: "application/json",
+  },
+): Promise<{ statusCode: number; body: unknown }> {
+  const response = await fetch(`${CLIPROXYAPI_MANAGEMENT_URL}/api-call`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${MANAGEMENT_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      auth_index: authIndex,
+      method,
+      url,
+      header,
+      ...(data === undefined ? {} : { data: JSON.stringify(data) }),
+    }),
+  });
+  if (!response.ok) throw new Error(`Management API call failed: ${response.status}`);
+  return parseXaiApiCallBody((await response.json()) as ApiCallResponse);
+}
+
+function xaiBillingGroup(config: Record<string, unknown>): QuotaGroup | null {
+  const period = (config.currentPeriod ?? config.current_period) as Record<string, unknown> | null;
+  const usage = Number(config.creditUsagePercent ?? config.credit_usage_percent);
+  const usagePercent = Number.isFinite(usage) ? Math.max(0, Math.min(100, usage)) : null;
+  const end = typeof period?.end === "string"
+    ? period.end
+    : typeof (config.billingPeriodEnd ?? config.billing_period_end) === "string"
+      ? String(config.billingPeriodEnd ?? config.billing_period_end)
+      : null;
+  const productUsage = config.productUsage ?? config.product_usage;
+  const hasData = usagePercent !== null || Boolean(end) || Array.isArray(productUsage);
+  if (!hasData) return null;
+  const remaining = usagePercent === null ? null : Math.max(0, 1 - usagePercent / 100);
+  return {
+    id: "xai-billing",
+    label: "xAI billing quota",
+    remainingFraction: remaining,
+    resetTime: end,
+    models: [],
+    windowType: "provider",
+  };
+}
+
+async function fetchXAIQuota(authIndex: string): Promise<{ groups: QuotaGroup[]; source: string }> {
+  let billingError: unknown;
+  for (const endpoint of XAI_BILLING_ENDPOINTS) {
+    try {
+      const result = await xaiApiCall(authIndex, "GET", endpoint, undefined, {
+        Authorization: "Bearer $TOKEN$",
+        "x-xai-token-auth": "xai-grok-cli",
+        "x-grok-client-version": "0.2.91",
+        Accept: "*/*",
+        "User-Agent": "grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)",
+      });
+      if (result.statusCode >= 200 && result.statusCode < 300 && result.body && typeof result.body === "object") {
+        const body = result.body as Record<string, unknown>;
+        const config = (body.config ?? body) as Record<string, unknown>;
+        const group = xaiBillingGroup(config);
+        if (group) return { groups: [group], source: endpoint };
+      }
+      billingError = new Error(`XAI billing returned ${result.statusCode}`);
+    } catch (error) {
+      billingError = error;
+    }
+  }
+
+  const [profile, health] = await Promise.allSettled([
+    xaiApiCall(authIndex, "GET", XAI_API_ME_URL),
+    xaiApiCall(authIndex, "POST", XAI_PAID_HEALTH_URL, {
+      model: "grok-4.5",
+      messages: [{ role: "user", content: "ping" }],
+      max_tokens: 1,
+      stream: false,
+    }, { Authorization: "Bearer $TOKEN$", "Content-Type": "application/json", Accept: "application/json" }),
+  ]);
+  const healthResult = health.status === "fulfilled" ? health.value : null;
+  if (!healthResult || healthResult.statusCode < 200 || healthResult.statusCode >= 300) {
+    throw billingError instanceof Error ? billingError : new Error(`XAI quota unavailable (${healthResult?.statusCode ?? "request failed"})`);
+  }
+  const profileResult = profile.status === "fulfilled" ? profile.value : null;
+  const profileBody = profileResult && profileResult.statusCode >= 200 && profileResult.statusCode < 300 && profileResult.body && typeof profileResult.body === "object"
+    ? profileResult.body as Record<string, unknown>
+    : null;
+  return {
+    source: "api.x.ai paid health",
+    groups: [{
+      id: "xai-paid-health",
+      label: `xAI paid account${typeof profileBody?.name === "string" ? ` (${profileBody.name})` : ""}`,
+      remainingFraction: null,
+      resetTime: null,
+      models: [],
+      windowType: "provider",
+    }],
+  };
+}
+
 async function fetchAntigravityProjectId(authIndex: string): Promise<string | null> {
   try {
     const response = await fetch(`${CLIPROXYAPI_MANAGEMENT_URL}/api-call`, {
@@ -1254,14 +1375,31 @@ export async function GET(request: NextRequest) {
       }
 
       if (providerNorm === "xai") {
-        return {
-          auth_index: authIndex,
-          provider: providerForResponse,
-          email: displayEmail,
-          supported: true,
-          quotaSupported: false,
-          error: "XAI account is supported, but CLIProxyAPI does not expose XAI quota data",
-        };
+        try {
+          const result = await fetchXAIQuota(authIndex);
+          return {
+            auth_index: authIndex,
+            provider: providerForResponse,
+            email: displayEmail,
+            supported: true,
+            quotaSupported: true,
+            monitorMode: "window-based",
+            snapshotFetchedAt: new Date().toISOString(),
+            snapshotSource: result.source,
+            groups: result.groups,
+          };
+        } catch (error) {
+          return {
+            auth_index: authIndex,
+            provider: providerForResponse,
+            email: displayEmail,
+            supported: true,
+            quotaSupported: false,
+            error: error instanceof Error
+              ? `XAI quota unavailable: ${error.message}`
+              : "XAI quota unavailable",
+          };
+        }
       }
 
       if (providerNorm === "kimi") {
