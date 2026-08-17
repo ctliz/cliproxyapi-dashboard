@@ -191,10 +191,16 @@ function xaiBillingGroup(
     config.onDemandCap !== undefined || config.monthlyLimit !== undefined ||
     config.billingPeriodStart !== undefined || config.billingPeriodEnd !== undefined;
   if (!hasData) return null;
+  const valueLabel = kind === "monthly" && monthlyLimit !== null && used !== null
+    ? `${used} / ${monthlyLimit}`
+    : kind === "weekly" && xaiNumber(config.onDemandCap) !== null && xaiNumber(config.onDemandUsed) !== null
+      ? `${xaiNumber(config.onDemandUsed)} / ${xaiNumber(config.onDemandCap)}`
+      : null;
   return {
     id: `xai-${kind}`,
     label: kind === "weekly" ? "xAI weekly quota" : "xAI monthly quota",
     remainingFraction: usagePercent === null ? null : Math.max(0, 1 - usagePercent / 100),
+    valueLabel,
     resetTime: end,
     models: [],
     windowType: "provider",

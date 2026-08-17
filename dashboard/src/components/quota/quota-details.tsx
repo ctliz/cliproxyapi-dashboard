@@ -145,6 +145,8 @@ export function QuotaDetails({
                   const shortScores = scores.filter((score) => score.isShortTerm);
                   const longMin = longScores.length > 0 ? Math.min(...longScores.map((score) => score.score)) : null;
                   const shortMin = shortScores.length > 0 ? Math.min(...shortScores.map((score) => score.score)) : null;
+                  const longValueLabel = account.groups?.find((group) => !isShortTermQuotaWindow(group, account.groups ?? []) && group.valueLabel)?.valueLabel ?? null;
+                  const shortValueLabel = account.groups?.find((group) => isShortTermQuotaWindow(group, account.groups ?? []) && group.valueLabel)?.valueLabel ?? null;
                   const statusLabel = !account.supported
                     ? t("unsupportedStatus")
                     : account.quotaSupported === false
@@ -228,7 +230,7 @@ export function QuotaDetails({
                                   </span>
                                 </>
                               ) : (
-                                <span className="text-xs text-[var(--text-muted)]">-</span>
+                                <span className="text-xs text-[var(--text-muted)]">{longValueLabel ?? "-"}</span>
                               )}
                             </span>
                             <span className="block pr-3">
@@ -240,7 +242,7 @@ export function QuotaDetails({
                                   </span>
                                 </>
                               ) : (
-                                <span className="text-xs text-[var(--text-muted)]">-</span>
+                                <span className="text-xs text-[var(--text-muted)]">{shortValueLabel ?? "-"}</span>
                               )}
                             </span>
                           </>
@@ -329,7 +331,9 @@ export function QuotaDetails({
                                         className="grid grid-cols-[minmax(0,1fr)_80px_160px] items-center border-b border-[var(--surface-border)] bg-[var(--surface-base)] px-3 py-2 last:border-b-0"
                                       >
                                         <span className="truncate text-xs text-[var(--text-primary)]">{group.label}</span>
-                                        <span className="text-xs text-[var(--text-secondary)]">{pct === null ? "-" : `${pct}%`}</span>
+                                        <span className="text-xs text-[var(--text-secondary)]">
+                                          {pct === null ? (group.valueLabel ?? "-") : `${pct}%`}
+                                        </span>
                                         <span className="truncate text-xs text-[var(--text-muted)]">{formatRelativeTime(group.resetTime, t)}</span>
                                       </div>
                                     );
