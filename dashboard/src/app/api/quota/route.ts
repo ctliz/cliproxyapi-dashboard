@@ -1260,7 +1260,8 @@ export async function GET(request: NextRequest) {
   }
 
   const CACHE_KEY = "quota:all";
-  const cached = quotaCache.get(CACHE_KEY);
+  const bypassCache = request?.nextUrl?.searchParams.has("bust") ?? false;
+  const cached = bypassCache ? null : quotaCache.get(CACHE_KEY);
   if (cached) {
     return NextResponse.json(cached);
   }
