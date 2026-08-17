@@ -3,9 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildQuotaSearch,
   buildQuotaToolbarQuery,
+  canonicalizeQuotaProvider,
   clearQuotaToolbarQuery,
   DEFAULT_QUOTA_QUERY_STATE,
   parseQuotaQueryState,
+  normalizeQuotaQueryState,
   type QuotaQueryState,
 } from "../query-state";
 
@@ -26,6 +28,11 @@ describe("quota query state", () => {
       status: "warning",
       page: 3,
     });
+  });
+
+  it("recognizes xai as a quota provider filter", () => {
+    expect(normalizeQuotaQueryState({ provider: "xai" }).provider).toBe("xai");
+    expect(canonicalizeQuotaProvider("xai")).toBe("xai");
   });
 
   it("normalizes unknown provider and status to all", () => {

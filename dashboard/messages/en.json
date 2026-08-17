@@ -765,7 +765,8 @@
       "codex": "Codex",
       "gemini-cli": "Gemini",
       "github-copilot": "Copilot",
-      "kimi": "Kimi"
+      "kimi": "Kimi",
+      "xai": "xAI"
     },
     "statusOption": {
       "all": "All statuses",
