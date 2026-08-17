@@ -161,23 +161,40 @@ async function xaiApiCall(
   return parseXaiApiCallBody((await response.json()) as ApiCallResponse);
 }
 
-function xaiBillingGroup(config: Record<string, unknown>): QuotaGroup | null {
+function xaiNumber(value: unknown): number | null {
+  const candidate = value && typeof value === "object" && "val" in value
+    ? (value as { val?: unknown }).val
+    : value;
+  const number = Number(candidate);
+  return Number.isFinite(number) ? number : null;
+}
+
+function xaiBillingGroup(
+  config: Record<string, unknown>,
+  kind: "weekly" | "monthly",
+): QuotaGroup | null {
   const period = (config.currentPeriod ?? config.current_period) as Record<string, unknown> | null;
-  const usage = Number(config.creditUsagePercent ?? config.credit_usage_percent);
-  const usagePercent = Number.isFinite(usage) ? Math.max(0, Math.min(100, usage)) : null;
-  const end = typeof period?.end === "string"
-    ? period.end
-    : typeof (config.billingPeriodEnd ?? config.billing_period_end) === "string"
+  const end = kind === "weekly"
+    ? (typeof period?.end === "string" ? period.end : null)
+    : (typeof (config.billingPeriodEnd ?? config.billing_period_end) === "string"
       ? String(config.billingPeriodEnd ?? config.billing_period_end)
-      : null;
-  const productUsage = config.productUsage ?? config.product_usage;
-  const hasData = usagePercent !== null || Boolean(end) || Array.isArray(productUsage);
+      : null);
+  const creditUsage = xaiNumber(config.creditUsagePercent ?? config.credit_usage_percent);
+  const monthlyLimit = xaiNumber(config.monthlyLimit ?? config.monthly_limit);
+  const used = xaiNumber(config.used);
+  const usagePercent = kind === "weekly"
+    ? (creditUsage === null ? null : Math.max(0, Math.min(100, creditUsage)))
+    : (monthlyLimit !== null && monthlyLimit > 0 && used !== null
+      ? Math.max(0, Math.min(100, (used / monthlyLimit) * 100))
+      : null);
+  const hasData = Boolean(end) || usagePercent !== null ||
+    config.onDemandCap !== undefined || config.monthlyLimit !== undefined ||
+    config.billingPeriodStart !== undefined || config.billingPeriodEnd !== undefined;
   if (!hasData) return null;
-  const remaining = usagePercent === null ? null : Math.max(0, 1 - usagePercent / 100);
   return {
-    id: "xai-billing",
-    label: "xAI billing quota",
-    remainingFraction: remaining,
+    id: `xai-${kind}`,
+    label: kind === "weekly" ? "xAI weekly quota" : "xAI monthly quota",
+    remainingFraction: usagePercent === null ? null : Math.max(0, 1 - usagePercent / 100),
     resetTime: end,
     models: [],
     windowType: "provider",
@@ -186,26 +203,31 @@ function xaiBillingGroup(config: Record<string, unknown>): QuotaGroup | null {
 
 async function fetchXAIQuota(authIndex: string): Promise<{ groups: QuotaGroup[]; source: string }> {
   let billingError: unknown;
-  for (const endpoint of XAI_BILLING_ENDPOINTS) {
-    try {
-      const result = await xaiApiCall(authIndex, "GET", endpoint, undefined, {
-        Authorization: "Bearer $TOKEN$",
-        "x-xai-token-auth": "xai-grok-cli",
-        "x-grok-client-version": "0.2.91",
-        Accept: "*/*",
-        "User-Agent": "grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)",
-      });
-      if (result.statusCode >= 200 && result.statusCode < 300 && result.body && typeof result.body === "object") {
-        const body = result.body as Record<string, unknown>;
-        const config = (body.config ?? body) as Record<string, unknown>;
-        const group = xaiBillingGroup(config);
-        if (group) return { groups: [group], source: endpoint };
-      }
-      billingError = new Error(`XAI billing returned ${result.statusCode}`);
-    } catch (error) {
-      billingError = error;
+  const billingResults = await Promise.allSettled(
+    XAI_BILLING_ENDPOINTS.map((endpoint) => xaiApiCall(authIndex, "GET", endpoint, undefined, {
+      Authorization: "Bearer $TOKEN$",
+      "x-xai-token-auth": "xai-grok-cli",
+      "x-grok-client-version": "0.2.91",
+      Accept: "*/*",
+      "User-Agent": "grok-pager/0.2.91 grok-shell/0.2.91 (macos; aarch64)",
+    }))
+  );
+  const groups: QuotaGroup[] = [];
+  billingResults.forEach((result, index) => {
+    if (result.status !== "fulfilled") {
+      billingError = result.reason;
+      return;
     }
-  }
+    if (result.value.statusCode < 200 || result.value.statusCode >= 300 || !result.value.body || typeof result.value.body !== "object") {
+      billingError = new Error(`XAI billing returned ${result.value.statusCode}`);
+      return;
+    }
+    const body = result.value.body as Record<string, unknown>;
+    const config = (body.config ?? body) as Record<string, unknown>;
+    const group = xaiBillingGroup(config, index === 0 ? "weekly" : "monthly");
+    if (group) groups.push(group);
+  });
+  if (groups.length > 0) return { groups, source: "cli-chat-proxy billing" };
 
   const [profile, health] = await Promise.allSettled([
     xaiApiCall(authIndex, "GET", XAI_API_ME_URL),
