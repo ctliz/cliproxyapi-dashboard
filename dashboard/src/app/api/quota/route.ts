@@ -1253,6 +1253,17 @@ export async function GET(request: NextRequest) {
         };
       }
 
+      if (providerNorm === "xai") {
+        return {
+          auth_index: authIndex,
+          provider: providerForResponse,
+          email: displayEmail,
+          supported: true,
+          quotaSupported: false,
+          error: "XAI account is supported, but CLIProxyAPI does not expose XAI quota data",
+        };
+      }
+
       if (providerNorm === "kimi") {
         const result = await fetchKimiQuota(authIndex);
 

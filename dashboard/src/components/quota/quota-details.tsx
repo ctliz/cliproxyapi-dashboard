@@ -145,16 +145,24 @@ export function QuotaDetails({
                   const shortScores = scores.filter((score) => score.isShortTerm);
                   const longMin = longScores.length > 0 ? Math.min(...longScores.map((score) => score.score)) : null;
                   const shortMin = shortScores.length > 0 ? Math.min(...shortScores.map((score) => score.score)) : null;
-                  const statusLabel = account.supported ? (account.error ? t("errorStatus") : t("activeStatus")) : t("unsupportedStatus");
+                  const statusLabel = !account.supported
+                    ? t("unsupportedStatus")
+                    : account.quotaSupported === false
+                      ? t("quotaUnavailableStatus")
+                      : account.error
+                        ? t("errorStatus")
+                        : t("activeStatus");
                   const accountSummary = isModelFirstAccount(account) ? summarizeModelFirstAccount(account) : null;
                   const accountQuotaUnverified =
                     isModelFirstAccount(account) && accountSummary
                       ? isModelFirstAccountQuotaUnverified(account, accountSummary)
                       : false;
-                  const modelFirstStatus = account.error
-                    ? t("errorStatus")
-                    : !account.supported
-                      ? t("unsupportedStatus")
+                  const modelFirstStatus = !account.supported
+                    ? t("unsupportedStatus")
+                    : account.quotaSupported === false
+                      ? t("quotaUnavailableStatus")
+                      : account.error
+                        ? t("errorStatus")
                       : accountSummary?.staleSnapshot
                         ? t("staleStatus")
                         : accountQuotaUnverified
@@ -242,7 +250,10 @@ export function QuotaDetails({
                       {isRowExpanded && (
                         <div className="border-t border-[var(--surface-border)] bg-[var(--surface-base)] px-4 py-3">
                           {account.error && <p className="mb-2 break-all text-xs text-rose-600">{account.error}</p>}
-                          {!account.supported && !account.error && (
+                          {account.quotaSupported === false && (
+                            <p className="mb-2 text-xs text-amber-700">{t("quotaNotAvailable")}</p>
+                          )}
+                          {!account.supported && !account.error && account.quotaSupported !== false && (
                             <p className="mb-2 text-xs text-amber-700">{t("quotaNotAvailable")}</p>
                           )}
                           {section.modelFirstView && accountSummary && (

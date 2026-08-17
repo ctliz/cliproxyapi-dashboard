@@ -837,6 +837,7 @@
     "errorStatus": "Fehler",
     "activeStatus": "Aktiv",
     "unsupportedStatus": "Nicht unterstützt",
+    "quotaUnavailableStatus": "Kontingent nicht verfügbar",
     "staleStatus": "Veraltet",
     "snapshotStatus": "Snapshot",
     "readyStatus": "Bereit",

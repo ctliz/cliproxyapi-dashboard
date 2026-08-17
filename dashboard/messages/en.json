@@ -837,6 +837,7 @@
     "errorStatus": "Error",
     "activeStatus": "Active",
     "unsupportedStatus": "Unsupported",
+    "quotaUnavailableStatus": "Quota unavailable",
     "staleStatus": "Stale",
     "snapshotStatus": "Snapshot",
     "readyStatus": "Ready",

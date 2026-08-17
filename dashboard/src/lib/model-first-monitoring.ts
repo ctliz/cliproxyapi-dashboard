@@ -44,6 +44,8 @@ export interface QuotaAccount {
   provider: string;
   email?: string | null;
   supported: boolean;
+  /** Whether this provider exposes quota data (the account can still be supported when false). */
+  quotaSupported?: boolean;
   error?: string;
   groups?: QuotaGroup[];
   raw?: unknown;

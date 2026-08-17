@@ -837,6 +837,7 @@
     "errorStatus": "错误",
     "activeStatus": "活跃",
     "unsupportedStatus": "不支持",
+    "quotaUnavailableStatus": "配额不可用",
     "staleStatus": "已过期",
     "snapshotStatus": "快照",
     "readyStatus": "就绪",

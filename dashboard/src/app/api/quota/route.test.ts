@@ -477,6 +477,37 @@ describe("GET /api/quota - imported provider normalization", () => {
     expect(account.supported).toBe(true);
   });
 
+  it("XAI accounts are supported even when quota data is unavailable", async () => {
+    const authFilesResponse = {
+      files: [
+        {
+          auth_index: 0,
+          provider: "xai",
+          email: "user@gmail.com",
+          disabled: false,
+          status: "active",
+        },
+      ],
+    };
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve(authFilesResponse),
+      body: { cancel: vi.fn() },
+    });
+
+    const { GET } = await import("./route");
+    const response = await GET(new Request("http://localhost/api/quota") as NextRequest);
+    const data = await response.json();
+
+    expect(data.accounts).toHaveLength(1);
+    expect(data.accounts[0]).toMatchObject({
+      provider: "xai",
+      supported: true,
+      quotaSupported: false,
+    });
+  });
+
   it("unknown providers remain unsupported", async () => {
     const authFilesResponse = {
       files: [
