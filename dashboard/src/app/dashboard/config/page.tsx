@@ -60,6 +60,11 @@ export interface PayloadConfig {
   filter: unknown;
 }
 
+export interface XaiConfig {
+  "inject-x-search"?: boolean;
+  "service-tier"?: string;
+}
+
 export interface OAuthModelAliasEntry {
   name: string;
   alias: string;
@@ -97,6 +102,7 @@ export interface Config {
   ampcode: AmpcodeConfig;
   payload: PayloadConfig;
   "oauth-model-alias": Record<string, OAuthModelAliasEntry[]>;
+  xai?: XaiConfig;
 }
 
 let idCounter = 0;
@@ -329,7 +335,7 @@ export default function ConfigPage() {
         "auth-dir", "streaming", "commercial-mode",
         "disable-cooling", "max-retry-credentials", "passthrough-headers",
         "incognito-browser", "kiro-preferred-endpoint", "kiro", "tls", "pprof",
-        "claude-header-defaults", "ampcode", "payload", "oauth-model-alias",
+        "claude-header-defaults", "ampcode", "payload", "oauth-model-alias", "xai",
       ] as const;
 
       const yamlChanges: Record<string, unknown> = {};
@@ -488,7 +494,18 @@ export default function ConfigPage() {
   const updatePayloadConfig = (key: keyof PayloadConfig, value: unknown) => {
     if (!config) return;
     setConfig({ ...config, payload: { ...config.payload, [key]: value } });
-  };
+  }
+
+  const updateXaiConfig = (key: keyof XaiConfig, value: XaiConfig[keyof XaiConfig]) => {
+    if (!config) return;
+    setConfig({
+      ...config,
+      xai: {
+        ...(config.xai ?? {}),
+        [key]: value,
+      },
+    });
+  };;
 
   const toggleProviderExpanded = (provider: string) => {
     setExpandedProviders((prev) => ({ ...prev, [provider]: !prev[provider] }));
@@ -678,6 +695,7 @@ export default function ConfigPage() {
         updateClaudeHeaderDefaults={updateClaudeHeaderDefaults}
         updateAmpcodeConfig={updateAmpcodeConfig}
         updatePayloadConfig={updatePayloadConfig}
+        updateXaiConfig={updateXaiConfig}
         toggleProviderExpanded={toggleProviderExpanded}
         updateOAuthAliasEntry={updateOAuthAliasEntry}
         addOAuthAliasEntry={addOAuthAliasEntry}

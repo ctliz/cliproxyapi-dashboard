@@ -12,6 +12,7 @@ import type {
   ClaudeHeaderDefaults,
   AmpcodeConfig,
   PayloadConfig,
+  XaiConfig,
   OAuthModelAliasEntry,
 } from "@/app/dashboard/config/page";
 
@@ -27,6 +28,7 @@ interface AgentConfigEditorProps {
   updateClaudeHeaderDefaults: (key: keyof ClaudeHeaderDefaults, value: string) => void;
   updateAmpcodeConfig: (key: keyof AmpcodeConfig, value: string | boolean | unknown) => void;
   updatePayloadConfig: (key: keyof PayloadConfig, value: unknown) => void;
+  updateXaiConfig: (key: keyof XaiConfig, value: XaiConfig[keyof XaiConfig]) => void;
   toggleProviderExpanded: (provider: string) => void;
   updateOAuthAliasEntry: (provider: string, index: number, field: keyof OAuthModelAliasEntry, value: string | boolean) => void;
   addOAuthAliasEntry: (provider: string) => void;
@@ -45,6 +47,7 @@ export default function AgentConfigEditor({
   updateClaudeHeaderDefaults,
   updateAmpcodeConfig,
   updatePayloadConfig,
+  updateXaiConfig,
   toggleProviderExpanded,
   updateOAuthAliasEntry,
   addOAuthAliasEntry,
@@ -85,6 +88,19 @@ export default function AgentConfigEditor({
           </ConfigField>
           <ConfigField label={t("fieldIncognitoBrowserLabel")} description={t("fieldIncognitoBrowserDesc")}>
             <Toggle enabled={config["incognito-browser"] ?? false} onChange={(value) => updateConfig("incognito-browser", value)} />
+          </ConfigField>
+        </div>
+      </section>
+
+      <section className="space-y-3 rounded-md border border-[var(--surface-border)] bg-[var(--surface-base)] p-4">
+        <SectionHeader title={t("sectionXai")} />
+        <p className="text-xs text-[var(--text-muted)]">{t("xaiPriorityNotice")}</p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <ConfigField label={t("fieldXaiPriorityLabel")} description={t("fieldXaiPriorityDesc")}>
+            <Toggle
+              enabled={(config.xai?.["service-tier"] ?? "").toLowerCase() === "priority"}
+              onChange={(value) => updateXaiConfig("service-tier", value ? "priority" : "")}
+            />
           </ConfigField>
         </div>
       </section>
