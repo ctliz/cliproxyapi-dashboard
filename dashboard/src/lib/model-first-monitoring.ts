@@ -21,8 +21,6 @@ export interface QuotaGroup {
   id: string;
   label: string;
   remainingFraction?: number | null;
-  /** Human-readable usage when a provider exposes a period but no fraction (e.g. 0 / 0). */
-  valueLabel?: string | null;
   resetTime: string | null;
   models: QuotaModel[];
   monitorMode?: QuotaMonitorMode;
