@@ -128,7 +128,7 @@ For full plugin documentation, see [opencode-cliproxyapi-sync](https://github.co
 
 ## Usage Collection
 
-The dashboard automatically collects usage statistics from CLIProxyAPI every 5 minutes using a dedicated cron service.
+The dashboard automatically collects usage statistics from CLIProxyAPI every minute using a dedicated cron service.
 
 ### How It Works
 

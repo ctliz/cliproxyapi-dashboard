@@ -105,7 +105,7 @@ export function groupAntigravityModels(
       remainingFraction: 1,
       resetTime: null,
       models: [],
-      windowType: "weekly",
+      windowType: "provider",
     };
 
     existing.models.push({

@@ -106,6 +106,11 @@ export interface BackupUserApiKey {
   name: string;
   lastUsedAt: string | null;
   createdAt: string;
+  fastEnabled?: boolean;
+  policyEnabled?: boolean;
+  allowedModels?: string[];
+  fallbackProvider?: string | null;
+  fallbackModel?: string | null;
 }
 
 export interface BackupConfigTemplate {
@@ -219,6 +224,20 @@ export interface BackupUsageRecord {
   reasoningTokens: number;
   cachedTokens: number;
   totalTokens: number;
+  provider?: string;
+  executorType?: string;
+  serviceTier?: string;
+  responseServiceTier?: string;
+  requestId?: string | null;
+  accountingVersion?: number;
+  accountingQuality?: string;
+  inputTotalTokens?: number;
+  uncachedInputTokens?: number;
+  cacheReadTokens?: number;
+  cacheWriteTokens?: number;
+  outputTotalTokens?: number;
+  nonReasoningOutputTokens?: number;
+  unclassifiedTokens?: number;
   failed: boolean;
   collectedAt: string;
 }

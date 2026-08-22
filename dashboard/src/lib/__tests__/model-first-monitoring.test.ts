@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   enrichModelFirstGroup,
+  isModelFirstAccount,
   isModelFirstAccountQuotaUnverified,
   isModelFirstProviderQuotaUnverified,
   summarizeModelFirstProvider,
@@ -17,6 +18,12 @@ describe("model-first monitoring helpers", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("lets an explicit window-based mode override the provider fallback", () => {
+    expect(isModelFirstAccount({ provider: "antigravity", monitorMode: "window-based" })).toBe(false);
+    expect(isModelFirstAccount({ provider: "antigravity", monitorMode: "model-first" })).toBe(true);
+    expect(isModelFirstAccount({ provider: "antigravity" })).toBe(true);
   });
 
   it("enriches grouped model data with min/p50 and reset metrics", () => {

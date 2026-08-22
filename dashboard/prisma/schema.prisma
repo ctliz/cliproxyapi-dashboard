@@ -11,13 +11,13 @@ datasource db {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  username     String   @unique
-  passwordHash String
-  sessionVersion Int    @default(0)
-  isAdmin      Boolean  @default(false)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id             String   @id @default(cuid())
+  username       String   @unique
+  passwordHash   String
+  sessionVersion Int      @default(0)
+  isAdmin        Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   modelPreference     ModelPreference?
   agentModelOverrides AgentModelOverride?
@@ -86,11 +86,12 @@ model UserApiKey {
   lastUsedAt       DateTime?
   createdAt        DateTime  @default(now())
   policyEnabled    Boolean   @default(false)
+  fastEnabled      Boolean   @default(false)
   allowedModels    String[]  @default([])
   fallbackProvider String?
   fallbackModel    String?
 
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   usageRecords UsageRecord[]
 
   @@index([userId])
@@ -106,7 +107,7 @@ model ConfigTemplate {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
   subscriptions ConfigSubscription[]
 
   @@index([shareCode])
@@ -148,12 +149,12 @@ model ProviderKeyOwnership {
 }
 
 model ProviderOAuthOwnership {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   userId       String
   provider     String
   accountName  String
   accountEmail String?
-  createdAt    DateTime  @default(now())
+  createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -171,27 +172,27 @@ model SystemSetting {
 }
 
 model CustomProvider {
-  id          String   @id @default(cuid())
-  userId      String
-  groupId     String?                   // Optional: assign to a group
-  sortOrder   Int      @default(0)      // Priority order within group (or globally if ungrouped)
-  name        String                    // Display name (e.g., "OpenRouter")
-  providerId  String   @unique          // URL-safe ID (e.g., "openrouter-custom")
-  baseUrl     String                    // https://openrouter.ai/api/v1
-  apiKeyHash      String?                   // Hashed for identification (null when provider has no API key, e.g. Ollama)
-  apiKeyEncrypted String?                   // AES-256-GCM encrypted, for re-sync after proxy restart
-  prefix      String?                   // Optional routing prefix
-  proxyUrl    String?                   // Optional SOCKS5/HTTP proxy
-  headers     Json?     @default("{}")  // Custom headers JSON
-  createdAt   DateTime @default(now())
-  isShared    Boolean  @default(false) // Admin-shared providers are visible to all users
-  updatedAt   DateTime @updatedAt
-  
+  id              String   @id @default(cuid())
+  userId          String
+  groupId         String? // Optional: assign to a group
+  sortOrder       Int      @default(0) // Priority order within group (or globally if ungrouped)
+  name            String // Display name (e.g., "OpenRouter")
+  providerId      String   @unique // URL-safe ID (e.g., "openrouter-custom")
+  baseUrl         String // https://openrouter.ai/api/v1
+  apiKeyHash      String? // Hashed for identification (null when provider has no API key, e.g. Ollama)
+  apiKeyEncrypted String? // AES-256-GCM encrypted, for re-sync after proxy restart
+  prefix          String? // Optional routing prefix
+  proxyUrl        String? // Optional SOCKS5/HTTP proxy
+  headers         Json?    @default("{}") // Custom headers JSON
+  createdAt       DateTime @default(now())
+  isShared        Boolean  @default(false) // Admin-shared providers are visible to all users
+  updatedAt       DateTime @updatedAt
+
   user           User                          @relation(fields: [userId], references: [id], onDelete: Cascade)
   group          ProviderGroup?                @relation(fields: [groupId], references: [id], onDelete: SetNull)
   models         CustomProviderModel[]
   excludedModels CustomProviderExcludedModel[]
-  
+
   @@index([userId])
   @@index([isShared])
   @@index([groupId])
@@ -203,16 +204,16 @@ model ProviderGroup {
   id        String   @id @default(cuid())
   userId    String
   name      String
-  color     String?                    // Optional hex color for UI display
-  sortOrder Int      @default(0)       // Order among groups for this user
-  isActive  Boolean  @default(true)    // Enable/disable whole group
+  color     String? // Optional hex color for UI display
+  sortOrder Int      @default(0) // Order among groups for this user
+  isActive  Boolean  @default(true) // Enable/disable whole group
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   providers CustomProvider[]
 
-  @@unique([userId, name])             // Unique group names per user
+  @@unique([userId, name]) // Unique group names per user
   @@index([userId])
   @@map("provider_groups")
 }
@@ -222,9 +223,9 @@ model CustomProviderModel {
   customProviderId String
   upstreamName     String // e.g., "moonshotai/kimi-k2:free"
   alias            String // e.g., "kimi-k2"
-  
+
   customProvider CustomProvider @relation(fields: [customProviderId], references: [id], onDelete: Cascade)
-  
+
   @@index([customProviderId])
   @@map("custom_provider_models")
 }
@@ -233,20 +234,20 @@ model CustomProviderExcludedModel {
   id               String @id @default(cuid())
   customProviderId String
   pattern          String // e.g., "gpt-4", "claude-*"
-  
+
   customProvider CustomProvider @relation(fields: [customProviderId], references: [id], onDelete: Cascade)
-  
+
   @@index([customProviderId])
   @@map("custom_provider_excluded_models")
 }
 
 model AuditLog {
   id        String   @id @default(cuid())
-  userId    String   // Who performed the action
-  action    String   // e.g., "USER_CREATED", "API_KEY_REVOKED"
-  target    String?  // What was affected (e.g., username, keyId)
-  metadata  Json?    // Additional context
-  ipAddress String?  // Source IP
+  userId    String // Who performed the action
+  action    String // e.g., "USER_CREATED", "API_KEY_REVOKED"
+  target    String? // What was affected (e.g., username, keyId)
+  metadata  Json? // Additional context
+  ipAddress String? // Source IP
   createdAt DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -259,21 +260,35 @@ model AuditLog {
 }
 
 model UsageRecord {
-  id              String   @id @default(cuid())
-  authIndex       String
-  apiKeyId        String?
-  userId          String?
-  model           String
-  source          String
-  timestamp       DateTime
-  latencyMs       Int      @default(0)
-  inputTokens     Int      @default(0)
-  outputTokens    Int      @default(0)
-  reasoningTokens Int      @default(0)
-  cachedTokens    Int      @default(0)
-  totalTokens     Int      @default(0)
-  failed          Boolean  @default(false)
-  collectedAt     DateTime @default(now())
+  id                       String   @id @default(cuid())
+  authIndex                String
+  apiKeyId                 String?
+  userId                   String?
+  model                    String
+  source                   String
+  timestamp                DateTime
+  latencyMs                Int      @default(0)
+  inputTokens              Int      @default(0)
+  outputTokens             Int      @default(0)
+  reasoningTokens          Int      @default(0)
+  cachedTokens             Int      @default(0)
+  totalTokens              Int      @default(0)
+  provider                 String   @default("")
+  executorType             String   @default("")
+  serviceTier              String   @default("")
+  responseServiceTier      String   @default("")
+  requestId                String?
+  accountingVersion        Int      @default(1)
+  accountingQuality        String   @default("legacy")
+  inputTotalTokens         Int      @default(0)
+  uncachedInputTokens      Int      @default(0)
+  cacheReadTokens          Int      @default(0)
+  cacheWriteTokens         Int      @default(0)
+  outputTotalTokens        Int      @default(0)
+  nonReasoningOutputTokens Int      @default(0)
+  unclassifiedTokens       Int      @default(0)
+  failed                   Boolean  @default(false)
+  collectedAt              DateTime @default(now())
 
   user   User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
   apiKey UserApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
@@ -287,18 +302,20 @@ model UsageRecord {
   @@index([userId, timestamp])
   @@index([authIndex, timestamp])
   @@index([collectedAt])
+  @@index([requestId])
+  @@index([accountingVersion])
   @@map("usage_records")
 }
 
 model PerplexityCookie {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   userId     String
   cookieData String
-  label      String   @default("Default")
-  isActive   Boolean  @default(true)
+  label      String    @default("Default")
+  isActive   Boolean   @default(true)
   lastUsedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -332,8 +349,8 @@ model BackupRecord {
   completedAt DateTime?
   createdById String
   createdBy   User         @relation(fields: [createdById], references: [id], onDelete: Cascade)
-  checksum    String?      // SHA-256 for integrity verification
-  metadata    Json?        // Additional info: DB version, model counts, dashboard version
+  checksum    String? // SHA-256 for integrity verification
+  metadata    Json? // Additional info: DB version, model counts, dashboard version
 
   @@index([createdAt])
   @@index([createdById])
@@ -344,7 +361,7 @@ model BackupSchedule {
   id        String    @id @default(cuid())
   enabled   Boolean   @default(false)
   cronExpr  String    @default("0 3 * * *") // Default: 3 AM daily
-  retention Int       @default(7)           // Days to keep backups
+  retention Int       @default(7) // Days to keep backups
   lastRun   DateTime?
   nextRun   DateTime?
   updatedAt DateTime  @updatedAt

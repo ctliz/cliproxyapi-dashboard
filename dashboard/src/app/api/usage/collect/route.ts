@@ -6,6 +6,7 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { randomUUID, timingSafeEqual } from "crypto";
 import { Errors } from "@/lib/errors";
+import { normalizeTokenAccounting, type QueueTokenDetails } from "@/lib/usage/token-accounting";
 
 const CLIPROXYAPI_MANAGEMENT_URL =
   process.env.CLIPROXYAPI_MANAGEMENT_URL ||
@@ -48,22 +49,19 @@ function markCollectorError(runId: string, errorMessage: string): Promise<void> 
     });
 }
 
-interface TokenDetails {
-  input_tokens?: number;
-  output_tokens?: number;
-  reasoning_tokens?: number;
-  cached_tokens?: number;
-  total_tokens?: number;
-}
-
 interface UsageQueueEntry {
   timestamp: string;
   latency_ms?: number;
   source?: string;
   auth_index: string;
-  tokens?: TokenDetails;
+  tokens?: QueueTokenDetails;
+  accounting_version?: number;
+  token_breakdown?: Parameters<typeof normalizeTokenAccounting>[0]["token_breakdown"];
   failed?: boolean;
   provider?: string;
+  executor_type?: string;
+  service_tier?: string;
+  response_service_tier?: string;
   model: string;
   alias?: string;
   endpoint?: string;
@@ -95,6 +93,20 @@ interface UsageRecordCandidate {
   reasoningTokens: number;
   cachedTokens: number;
   totalTokens: number;
+  provider: string;
+  executorType: string;
+  serviceTier: string;
+  responseServiceTier: string;
+  requestId: string | null;
+  accountingVersion: number;
+  accountingQuality: string;
+  inputTotalTokens: number;
+  uncachedInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTotalTokens: number;
+  nonReasoningOutputTokens: number;
+  unclassifiedTokens: number;
   failed: boolean;
 }
 
@@ -349,7 +361,7 @@ export async function POST(request: NextRequest) {
       const authIndex = entry.auth_index;
       if (!authIndex) continue;
 
-      const tokens = entry.tokens ?? {};
+      const accounting = normalizeTokenAccounting(entry);
       const source = entry.source ?? "";
       const model = entry.model;
 
@@ -408,11 +420,12 @@ export async function POST(request: NextRequest) {
         source,
         timestamp: ts,
         latencyMs: Number.isFinite(Number(entry.latency_ms)) ? Math.max(0, Math.round(Number(entry.latency_ms))) : 0,
-        inputTokens: tokens.input_tokens || 0,
-        outputTokens: tokens.output_tokens || 0,
-        reasoningTokens: tokens.reasoning_tokens || 0,
-        cachedTokens: tokens.cached_tokens || 0,
-        totalTokens: tokens.total_tokens || 0,
+        ...accounting,
+        provider: entry.provider?.trim() ?? "",
+        executorType: entry.executor_type?.trim() ?? "",
+        serviceTier: entry.service_tier?.trim() ?? "",
+        responseServiceTier: entry.response_service_tier?.trim() ?? "",
+        requestId: entry.request_id?.trim() || null,
         failed: entry.failed || false,
       });
     }

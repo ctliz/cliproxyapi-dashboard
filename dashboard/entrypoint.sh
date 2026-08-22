@@ -127,6 +127,7 @@ async function migrate() {
       "lastUsedAt" TIMESTAMP(3),
       "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       "policyEnabled" BOOLEAN NOT NULL DEFAULT false,
+      "fastEnabled" BOOLEAN NOT NULL DEFAULT false,
       "allowedModels" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
       "fallbackProvider" TEXT,
       "fallbackModel" TEXT,
@@ -141,6 +142,15 @@ async function migrate() {
     DO $$ BEGIN
       ALTER TABLE "user_api_keys" ADD COLUMN "policyEnabled" BOOLEAN NOT NULL DEFAULT false;
     EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    DO $$ BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'user_api_keys' AND column_name = 'fastEnabled'
+      ) THEN
+        ALTER TABLE "user_api_keys" ADD COLUMN "fastEnabled" BOOLEAN NOT NULL DEFAULT false;
+        UPDATE "user_api_keys" SET "fastEnabled" = true;
+      END IF;
+    END $$;
     DO $$ BEGIN
       ALTER TABLE "user_api_keys" ADD COLUMN "allowedModels" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
     EXCEPTION WHEN duplicate_column THEN NULL; END $$;
@@ -374,6 +384,20 @@ async function migrate() {
       "reasoningTokens" INTEGER NOT NULL DEFAULT 0,
       "cachedTokens" INTEGER NOT NULL DEFAULT 0,
       "totalTokens" INTEGER NOT NULL DEFAULT 0,
+      "provider" TEXT NOT NULL DEFAULT '',
+      "executorType" TEXT NOT NULL DEFAULT '',
+      "serviceTier" TEXT NOT NULL DEFAULT '',
+      "responseServiceTier" TEXT NOT NULL DEFAULT '',
+      "requestId" TEXT,
+      "accountingVersion" INTEGER NOT NULL DEFAULT 1,
+      "accountingQuality" TEXT NOT NULL DEFAULT 'legacy',
+      "inputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+      "uncachedInputTokens" INTEGER NOT NULL DEFAULT 0,
+      "cacheReadTokens" INTEGER NOT NULL DEFAULT 0,
+      "cacheWriteTokens" INTEGER NOT NULL DEFAULT 0,
+      "outputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+      "nonReasoningOutputTokens" INTEGER NOT NULL DEFAULT 0,
+      "unclassifiedTokens" INTEGER NOT NULL DEFAULT 0,
       "failed" BOOLEAN NOT NULL DEFAULT false,
       "collectedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
       CONSTRAINT "usage_records_pkey" PRIMARY KEY ("id")
@@ -399,6 +423,25 @@ async function migrate() {
     DO $$ BEGIN
       ALTER TABLE "usage_records" ADD COLUMN "latencyMs" INTEGER NOT NULL DEFAULT 0;
     EXCEPTION WHEN duplicate_column THEN NULL; END $$;
+    DO $$ BEGIN
+      ALTER TABLE "usage_records"
+        ADD COLUMN IF NOT EXISTS "provider" TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS "executorType" TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS "serviceTier" TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS "responseServiceTier" TEXT NOT NULL DEFAULT '',
+        ADD COLUMN IF NOT EXISTS "requestId" TEXT,
+        ADD COLUMN IF NOT EXISTS "accountingVersion" INTEGER NOT NULL DEFAULT 1,
+        ADD COLUMN IF NOT EXISTS "accountingQuality" TEXT NOT NULL DEFAULT 'legacy',
+        ADD COLUMN IF NOT EXISTS "inputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "uncachedInputTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "cacheReadTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "cacheWriteTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "outputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "nonReasoningOutputTokens" INTEGER NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS "unclassifiedTokens" INTEGER NOT NULL DEFAULT 0;
+    END $$;
+    CREATE INDEX IF NOT EXISTS "usage_records_requestId_idx" ON "usage_records"("requestId");
+    CREATE INDEX IF NOT EXISTS "usage_records_accountingVersion_idx" ON "usage_records"("accountingVersion");
 
     -- Perplexity cookies table (stores session cookies for Perplexity Pro sidecar)
     CREATE TABLE IF NOT EXISTS "perplexity_cookies" (
@@ -499,6 +542,24 @@ async function migrate() {
         console.warn('[dashboard] Failed to write global-model-filter.json:', fe.message);
       }
 
+      const fastRes = await client.query(
+        'SELECT "name", "key" FROM "user_api_keys" WHERE "fastEnabled" = true ORDER BY "name", "id"'
+      );
+      const crypto = require('crypto');
+      const fastPolicyPath = process.env.CLIPROXYAPI_API_KEY_FAST_POLICY || '/Users/tsiji/.config/cliproxyapi/api-key-fast-policy.json';
+      const fastPolicy = {
+        rules: fastRes.rows.map((row) => ({
+          api_key_name: row.name.trim(),
+          token_sha256: crypto.createHash('sha256').update(row.key.trim()).digest('hex')
+        }))
+      };
+      try {
+        fs.mkdirSync(require('path').dirname(fastPolicyPath), { recursive: true });
+        fs.writeFileSync(fastPolicyPath, JSON.stringify(fastPolicy, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
+      } catch (fe) {
+        console.warn('[dashboard] Failed to write api-key-fast-policy.json:', fe.message);
+      }
+
       const baseUrl = process.env.CLIPROXYAPI_MANAGEMENT_URL || 'http://host.docker.internal:8317/v0/management';
       const mgmtKey = process.env.MANAGEMENT_API_KEY;
       if (mgmtKey) {
@@ -531,7 +592,7 @@ async function migrate() {
           body: JSON.stringify(cleanOauthMap)
         }).catch(() => {});
       }
-      console.log('[dashboard] Startup policy sync completed (' + excluded.length + ' excluded models)');
+      console.log('[dashboard] Startup policy sync completed (' + excluded.length + ' excluded models, ' + fastPolicy.rules.length + ' Fast API key names)');
     } catch (pe) {
       console.warn('[dashboard] Startup policy sync warning:', pe.message);
     }

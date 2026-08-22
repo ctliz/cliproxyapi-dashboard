@@ -690,20 +690,19 @@ export async function toggleOAuthAccountByIdOrName(
       }
     }
 
-    const endpoint = `${MANAGEMENT_BASE_URL}/auth-files?name=${encodeURIComponent(resolved.accountName)}`;
+    // Status changes must use the partial-update endpoint. POST /auth-files is
+    // the credential upload endpoint and would replace the OAuth JSON file.
+    const endpoint = `${MANAGEMENT_BASE_URL}/auth-files/status`;
 
     let postRes: Response;
     try {
       postRes = await fetchWithTimeout(endpoint, {
-        method: "POST",
+        method: "PATCH",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${MANAGEMENT_API_KEY}`,
         },
-        body: JSON.stringify({
-          name: resolved.accountName,
-          disabled,
-        }),
+        body: JSON.stringify({ name: resolved.accountName, disabled }),
       });
     } catch (fetchError) {
       if (fetchError instanceof Error && fetchError.name === "AbortError") {
@@ -712,7 +711,7 @@ export async function toggleOAuthAccountByIdOrName(
           endpoint,
           accountName: resolved.accountName,
           timeoutMs: FETCH_TIMEOUT_MS,
-        }, "Fetch timeout - toggleOAuthAccountByIdOrName POST");
+        }, "Fetch timeout - toggleOAuthAccountByIdOrName PATCH");
         return { ok: false, error: "Request timeout toggling OAuth account" };
       }
       throw fetchError;

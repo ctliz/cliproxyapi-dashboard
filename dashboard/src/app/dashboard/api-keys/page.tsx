@@ -196,6 +196,7 @@ export default function ApiKeysPage() {
   const handlePolicySaved = (updated: {
     id: string;
     policyEnabled: boolean;
+    fastEnabled: boolean;
     allowedModels: string[];
     fallbackProvider: string | null;
     fallbackModel: string | null;
@@ -258,6 +259,7 @@ export default function ApiKeysPage() {
             </div>
             {apiKeys.map((apiKey) => {
               const hasPolicy = Boolean(apiKey.policyEnabled);
+              const hasFastMode = Boolean(apiKey.fastEnabled);
               const allowedCount = apiKey.allowedModels?.length || 0;
               const fallbackText =
                 apiKey.fallbackProvider && apiKey.fallbackModel
@@ -289,6 +291,11 @@ export default function ApiKeysPage() {
 
                   {/* Policy Column */}
                   <div className="min-w-0 pr-2">
+                    {hasFastMode && (
+                      <span className="mb-1 inline-flex items-center rounded-full border border-sky-500/20 bg-sky-500/10 px-2 py-0.5 text-[11px] font-medium text-sky-600 dark:text-sky-400">
+                        {t("fastBadge")}
+                      </span>
+                    )}
                     {hasPolicy ? (
                       <div className="flex flex-col gap-0.5">
                         <div className="flex items-center gap-1">

@@ -1071,7 +1071,7 @@ fi
 log_info "=== Usage Collector Cron Job ==="
 echo ""
 
-log_info "Setting up usage data collection (every 5 minutes)..."
+log_info "Setting up usage data collection (every minute)..."
 log_info "This prevents data loss when the proxy restarts."
 
 if [ $EXTERNAL_PROXY -eq 1 ]; then
@@ -1080,14 +1080,14 @@ else
     COLLECTOR_URL="https://${DASHBOARD_SUBDOMAIN}.${DOMAIN}"
 fi
 
-COLLECTOR_CRON_SCHEDULE="*/5 * * * *"
+COLLECTOR_CRON_SCHEDULE="* * * * *"
 COLLECTOR_CRON_CMD="curl -sf -X POST ${COLLECTOR_URL}/api/usage/collect -H 'Authorization: Bearer ${COLLECTOR_API_KEY}' -o /dev/null"
 
 if crontab -l 2>/dev/null | grep -q "/api/usage/collect"; then
     log_warning "Usage collector cron job already exists"
 else
-    (crontab -l 2>/dev/null || true; echo "# CLIProxyAPI usage collector (every 5 minutes)"; echo "$COLLECTOR_CRON_SCHEDULE $COLLECTOR_CRON_CMD") | crontab -
-    log_success "Usage collector cron job installed (every 5 minutes)"
+    (crontab -l 2>/dev/null || true; echo "# CLIProxyAPI usage collector (every minute)"; echo "$COLLECTOR_CRON_SCHEDULE $COLLECTOR_CRON_CMD") | crontab -
+    log_success "Usage collector cron job installed (every minute)"
 fi
 
 echo ""

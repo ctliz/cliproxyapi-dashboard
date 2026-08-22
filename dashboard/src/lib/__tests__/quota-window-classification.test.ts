@@ -13,31 +13,36 @@ describe("isShortTermQuotaWindow", () => {
     ).toBe(true);
   });
 
-  it("classifies the earlier Antigravity reset cluster as short-term", () => {
+  it("uses explicit provider window types", () => {
+    expect(
+      isShortTermQuotaWindow({
+        id: "gemini-5h",
+        label: "Gemini Models - Five Hour Limit Remaining",
+        resetTime: "2026-04-06T01:53:55.000Z",
+        windowType: "five-hour",
+      })
+    ).toBe(true);
+    expect(
+      isShortTermQuotaWindow({
+        id: "gemini-weekly",
+        label: "Gemini Models - Weekly Limit Remaining",
+        resetTime: "2026-04-06T01:53:55.000Z",
+        windowType: "weekly",
+      })
+    ).toBe(false);
+  });
+
+  it("does not infer a weekly window is short-term from a nearby reset", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-05T20:54:00.000Z"));
 
-    const groups = [
-      {
-        id: "other",
-        label: "Other",
+    expect(
+      isShortTermQuotaWindow({
+        id: "primary-window",
+        label: "168h Window",
         resetTime: "2026-04-06T01:53:55.000Z",
-      },
-      {
-        id: "gemini-2-5-flash",
-        label: "Gemini 2.5 Flash",
-        resetTime: "2026-04-06T01:53:55.000Z",
-      },
-      {
-        id: "gemini-3-pro",
-        label: "Gemini 3 Pro",
-        resetTime: "2026-04-12T20:53:55.000Z",
-      },
-    ] as const;
-
-    expect(isShortTermQuotaWindow(groups[0], groups)).toBe(true);
-    expect(isShortTermQuotaWindow(groups[1], groups)).toBe(true);
-    expect(isShortTermQuotaWindow(groups[2], groups)).toBe(false);
+      })
+    ).toBe(false);
 
     vi.useRealTimers();
   });

@@ -6,10 +6,12 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 
 import { ChartContainer, SERIES_PALETTE, useChartTheme, formatCompact } from "@/components/ui/chart-theme";
 import {
   resolveModelPrice,
-  calculateCost,
+  calculateCostFromBuckets,
+  resolveBucketRates,
   loadCustomPricing,
   formatUSD,
   type ModelPrice,
+  type PricingBucket,
 } from "@/lib/model-pricing";
 
 /* ── Types ────────────────────────────────────────────────── */
@@ -25,6 +27,7 @@ interface KeyUsage {
     totalTokens: number;
     inputTokens: number;
     outputTokens: number;
+    pricingBuckets: PricingBucket[];
   }>;
 }
 
@@ -45,6 +48,9 @@ interface ModelCostEntry {
   estimatedCost: number;
   inputPer1M: number;
   outputPer1M: number;
+  cachedInputPer1M: number;
+  cacheWritePer1M: number;
+  rateLabel: string;
   priced: boolean;
 }
 
@@ -55,26 +61,66 @@ interface ProviderCostEntry {
   requests: number;
 }
 
-function buildCostBreakdown(keys: Record<string, KeyUsage>, customPricing: Record<string, ModelPrice>): ModelCostEntry[] {
+export function buildCostBreakdown(keys: Record<string, KeyUsage>, customPricing: Record<string, ModelPrice>): ModelCostEntry[] {
   // Aggregate all models across all keys
-  const modelAgg: Record<string, { inputTokens: number; outputTokens: number; totalTokens: number; requests: number }> = {};
+  const modelAgg: Record<string, {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+    requests: number;
+    pricingBuckets: PricingBucket[];
+  }> = {};
 
   for (const key of Object.values(keys)) {
     for (const [model, data] of Object.entries(key.models)) {
       if (!modelAgg[model]) {
-        modelAgg[model] = { inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0 };
+        modelAgg[model] = { inputTokens: 0, outputTokens: 0, totalTokens: 0, requests: 0, pricingBuckets: [] };
       }
       modelAgg[model].inputTokens += data.inputTokens;
       modelAgg[model].outputTokens += data.outputTokens;
       modelAgg[model].totalTokens += data.totalTokens;
       modelAgg[model].requests += data.totalRequests;
+      for (const incoming of data.pricingBuckets ?? []) {
+        let bucket = modelAgg[model].pricingBuckets.find((candidate) =>
+          candidate.longContext === incoming.longContext && candidate.serviceTier === incoming.serviceTier
+        );
+        if (!bucket) {
+          bucket = { ...incoming };
+          modelAgg[model].pricingBuckets.push(bucket);
+          continue;
+        }
+        bucket.requests += incoming.requests;
+        bucket.inputTokens += incoming.inputTokens;
+        bucket.uncachedInputTokens += incoming.uncachedInputTokens;
+        bucket.cacheReadTokens += incoming.cacheReadTokens;
+        bucket.cacheWriteTokens += incoming.cacheWriteTokens;
+        bucket.outputTokens += incoming.outputTokens;
+      }
     }
   }
 
   return Object.entries(modelAgg)
     .map(([model, data]) => {
       const price = resolveModelPrice(model, customPricing);
-      const estimatedCost = price ? calculateCost(data.inputTokens, data.outputTokens, price) : 0;
+      const fallbackBuckets: PricingBucket[] = [{
+        requests: data.requests,
+        inputTokens: data.inputTokens,
+        uncachedInputTokens: data.inputTokens,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        outputTokens: data.outputTokens,
+        longContext: false,
+        serviceTier: "standard",
+      }];
+      const pricingBuckets = data.pricingBuckets.length > 0 ? data.pricingBuckets : fallbackBuckets;
+      const priced = price !== null && !price.pricingUnavailable;
+      const estimatedCost = priced ? calculateCostFromBuckets(pricingBuckets, price) : 0;
+      const rateLabel = priced
+        ? [...new Set(pricingBuckets.map((bucket) => {
+          const selected = resolveBucketRates(price, bucket);
+          return `${selected.inputPer1M}/${selected.cachedInputPer1M}/${selected.cacheWritePer1M}/${selected.outputPer1M}`;
+        }))].join(" · ")
+        : "—";
       return {
         model,
         displayName: price?.displayName ?? model,
@@ -86,7 +132,10 @@ function buildCostBreakdown(keys: Record<string, KeyUsage>, customPricing: Recor
         estimatedCost,
         inputPer1M: price?.inputPer1M ?? 0,
         outputPer1M: price?.outputPer1M ?? 0,
-        priced: price !== null,
+        cachedInputPer1M: price?.cachedInputPer1M ?? price?.inputPer1M ?? 0,
+        cacheWritePer1M: price?.cacheWritePer1M ?? price?.inputPer1M ?? 0,
+        rateLabel,
+        priced,
       };
     })
     .sort((a, b) => b.estimatedCost - a.estimatedCost);
@@ -250,8 +299,8 @@ export function CostEstimation({ keys }: CostEstimationProps) {
                   <td className="px-3 py-2 text-right tabular-nums text-[var(--text-secondary)]">{entry.requests.toLocaleString()}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatCompact(entry.inputTokens)}</td>
                   <td className="px-3 py-2 text-right tabular-nums text-[var(--text-secondary)]">{formatCompact(entry.outputTokens)}</td>
-                  <td className="px-3 py-2 text-right tabular-nums text-[var(--text-muted)]">
-                    {entry.priced ? `${entry.inputPer1M}/${entry.outputPer1M}` : "—"}
+                  <td className="px-3 py-2 text-right tabular-nums text-[var(--text-muted)]" title={entry.rateLabel}>
+                    {entry.rateLabel}
                   </td>
                   <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700">{formatUSD(entry.estimatedCost)}</td>
                 </tr>
@@ -286,8 +335,8 @@ export function CostEstimation({ keys }: CostEstimationProps) {
           </table>
         </div>
         <div className="border-t border-[var(--surface-border)] px-4 py-2 text-[10px] text-[var(--text-muted)]">
-          💡 {t('costDisclaimerPart1')}{' '}
-          {t('costDisclaimerPart2')} <code className="bg-[var(--surface-muted)] px-1 rounded text-[9px]">cliproxy-custom-pricing</code>.
+          {t('costDisclaimerPart1')}{' '}
+          {t('costDisclaimerPart2')} <code className="bg-[var(--surface-muted)] px-1 rounded text-[9px]">cliproxy-custom-pricing-v2</code>.
         </div>
       </div>
     </div>

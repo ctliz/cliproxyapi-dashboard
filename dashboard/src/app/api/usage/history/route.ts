@@ -4,11 +4,11 @@ import { prisma } from "@/lib/db";
 import { logger } from "@/lib/logger";
 import { usageCache } from "@/lib/cache";
 import { Errors } from "@/lib/errors";
+import { Prisma } from "@/generated/prisma/client";
 
 // Cache for 5 seconds to allow frequent polling without overwhelming the database
 // The frontend polls every 60 seconds, so 5s cache won't cause missed updates
 const USAGE_HISTORY_CACHE_TTL_MS = 5_000;
-const USAGE_RECORD_LIMIT = 25_000;
 const REQUEST_EVENT_LIMIT = 200;
 const LATENCY_SERIES_LIMIT = 120;
 
@@ -29,7 +29,19 @@ interface KeyUsage {
     totalTokens: number;
     inputTokens: number;
     outputTokens: number;
+    pricingBuckets: PricingBucket[];
   }>;
+}
+
+interface PricingBucket {
+  requests: number;
+  inputTokens: number;
+  uncachedInputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  outputTokens: number;
+  longContext: boolean;
+  serviceTier: string;
 }
 
 interface RequestEvent {
@@ -70,26 +82,10 @@ function isValidDateParam(dateString: string): boolean {
     && date.getDate() === day;
 }
 
-function summarizeLatency(values: number[]): LatencySummary {
-  if (values.length === 0) {
-    return {
-      sampleCount: 0,
-      averageMs: 0,
-      p95Ms: 0,
-      maxMs: 0,
-    };
-  }
-
-  const sorted = [...values].sort((a, b) => a - b);
-  const total = values.reduce((sum, value) => sum + value, 0);
-  const p95Index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * 0.95) - 1));
-
-  return {
-    sampleCount: values.length,
-    averageMs: Math.round(total / values.length),
-    p95Ms: sorted[p95Index] ?? 0,
-    maxMs: sorted[sorted.length - 1] ?? 0,
-  };
+function dbNumber(value: bigint | number | string | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  const converted = Number(value);
+  return Number.isFinite(converted) ? converted : 0;
 }
 
 export async function GET(request: NextRequest) {
@@ -147,72 +143,165 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const whereClause = {
-      timestamp: {
-        gte: fromDate,
-        lte: toDate,
-      },
-      // Only show usage from dashboard-generated API keys (not OAuth auth-files)
-      apiKeyId: { not: null },
-      ...(isAdmin
-        ? {}
-        : {
-            OR: [
-              { userId: session.userId },
-              ...(sourceFilter.length > 0
-                ? [{ source: { in: sourceFilter } }]
-                : []),
-            ],
-          }),
-    };
+    const sourceAccess = sourceFilter.length > 0
+      ? Prisma.sql` OR r."source" IN (${Prisma.join(sourceFilter)})`
+      : Prisma.sql``;
+    const accessFilter = isAdmin
+      ? Prisma.sql``
+      : Prisma.sql`AND (r."userId" = ${session.userId}${sourceAccess})`;
+    const whereSql = Prisma.sql`
+      WHERE r."timestamp" >= ${fromDate}
+        AND r."timestamp" <= ${toDate}
+        AND r."apiKeyId" IS NOT NULL
+        ${accessFilter}
+    `;
+    const legacyIndependentCache = Prisma.sql`r."totalTokens" > r."inputTokens" + r."outputTokens"`;
+    const effectiveInput = Prisma.sql`CASE
+      WHEN r."accountingVersion" >= 2 THEN r."inputTotalTokens"
+      WHEN ${legacyIndependentCache} THEN GREATEST(r."totalTokens" - r."outputTokens", 0)
+      ELSE r."inputTokens"
+    END`;
+    const effectiveUncached = Prisma.sql`CASE
+      WHEN r."accountingVersion" >= 2 THEN r."uncachedInputTokens"
+      WHEN ${legacyIndependentCache} THEN r."inputTokens"
+      ELSE GREATEST(r."inputTokens" - r."cachedTokens", 0)
+    END`;
+    const effectiveOutput = Prisma.sql`CASE WHEN r."accountingVersion" >= 2 THEN r."outputTotalTokens" ELSE r."outputTokens" END`;
+    const effectiveCached = Prisma.sql`CASE WHEN r."accountingVersion" >= 2 THEN r."cacheReadTokens" ELSE r."cachedTokens" END`;
+    const effectiveCacheWrite = Prisma.sql`CASE
+      WHEN r."accountingVersion" >= 2 THEN r."cacheWriteTokens"
+      WHEN ${legacyIndependentCache} THEN GREATEST(r."totalTokens" - r."inputTokens" - r."cachedTokens" - r."outputTokens", 0)
+      ELSE 0
+    END`;
+    const effectiveServiceTier = Prisma.sql`COALESCE(NULLIF(r."responseServiceTier", ''), NULLIF(r."serviceTier", ''), 'standard')`;
+    const isLongContext = Prisma.sql`CASE
+      WHEN (r."model" LIKE 'gpt-5.6%' OR r."model" = 'gpt-5.5') AND ${effectiveInput} > 272000 THEN TRUE
+      WHEN r."model" = 'grok-4.6' AND ${effectiveInput} >= 200000 THEN TRUE
+      ELSE FALSE
+    END`;
+    const timeZone = process.env.TZ?.trim() || "UTC";
 
-    const usageRecords = await prisma.usageRecord.findMany({
-      where: whereClause,
-      select: {
-        apiKeyId: true,
-        userId: true,
-        authIndex: true,
-        model: true,
-        latencyMs: true,
-        totalTokens: true,
-        inputTokens: true,
-        outputTokens: true,
-        reasoningTokens: true,
-        cachedTokens: true,
-        failed: true,
-        timestamp: true,
-        user: {
-          select: {
-            username: true,
-          },
-        },
-        apiKey: {
-          select: {
-            name: true,
-          },
-        },
-      },
-      orderBy: {
-        timestamp: 'desc',
-      },
-      take: USAGE_RECORD_LIMIT + 1,
-    });
-
-    const truncated = usageRecords.length > USAGE_RECORD_LIMIT;
-    if (truncated) {
-      usageRecords.pop();
+    interface AggregateRow {
+      groupKey: string;
+      apiKeyId: string;
+      userId: string | null;
+      keyName: string | null;
+      username: string | null;
+      model: string;
+      failed: boolean;
+      requests: bigint;
+      totalTokens: bigint;
+      inputTokens: bigint;
+      outputTokens: bigint;
+      reasoningTokens: bigint;
+      cachedTokens: bigint;
+      uncachedInputTokens: bigint;
+      cacheWriteTokens: bigint;
+      longContext: boolean;
+      serviceTier: string;
+    }
+    interface DailyRow {
+      date: string;
+      requests: bigint;
+      tokens: bigint;
+      inputTokens: bigint;
+      outputTokens: bigint;
+      success: bigint;
+      failure: bigint;
+    }
+    interface EventRow {
+      timestamp: Date;
+      authIndex: string;
+      keyName: string | null;
+      username: string | null;
+      model: string;
+      latencyMs: number;
+      totalTokens: number;
+      inputTokens: number;
+      outputTokens: number;
+      failed: boolean;
+    }
+    interface LatencySummaryRow {
+      sampleCount: bigint;
+      averageMs: number | string | null;
+      p95Ms: number | null;
+      maxMs: number | null;
     }
 
-  const collectorState = await prisma.collectorState.findUnique({
-    where: { id: "singleton" },
-  });
+    const [aggregateRows, dailyRows, eventRows, latencyRows, latencySeriesRows, collectorState] = await Promise.all([
+      prisma.$queryRaw<AggregateRow[]>(Prisma.sql`
+        SELECT r."apiKeyId" AS "groupKey",
+               r."apiKeyId", r."userId", k."name" AS "keyName", u."username",
+               r."model", r."failed", COUNT(*) AS requests,
+               SUM(r."totalTokens") AS "totalTokens",
+               SUM(${effectiveInput}) AS "inputTokens",
+               SUM(${effectiveOutput}) AS "outputTokens",
+               SUM(r."reasoningTokens") AS "reasoningTokens",
+               SUM(${effectiveCached}) AS "cachedTokens",
+               SUM(${effectiveUncached}) AS "uncachedInputTokens",
+               SUM(${effectiveCacheWrite}) AS "cacheWriteTokens",
+               ${isLongContext} AS "longContext",
+               ${effectiveServiceTier} AS "serviceTier"
+        FROM "usage_records" r
+        LEFT JOIN "user_api_keys" k ON k."id" = r."apiKeyId"
+        LEFT JOIN "users" u ON u."id" = r."userId"
+        ${whereSql}
+        GROUP BY r."apiKeyId", r."userId", k."name", u."username", r."model", r."failed",
+                 ${isLongContext}, ${effectiveServiceTier}
+      `),
+      prisma.$queryRaw<DailyRow[]>(Prisma.sql`
+        SELECT to_char((r."timestamp" AT TIME ZONE 'UTC') AT TIME ZONE ${timeZone}, 'YYYY-MM-DD') AS date,
+               COUNT(*) AS requests,
+               SUM(r."totalTokens") AS tokens,
+               SUM(${effectiveInput}) AS "inputTokens",
+               SUM(${effectiveOutput}) AS "outputTokens",
+               COUNT(*) FILTER (WHERE NOT r."failed") AS success,
+               COUNT(*) FILTER (WHERE r."failed") AS failure
+        FROM "usage_records" r
+        ${whereSql}
+        GROUP BY date
+        ORDER BY date
+      `),
+      prisma.$queryRaw<EventRow[]>(Prisma.sql`
+        SELECT r."timestamp", r."authIndex", k."name" AS "keyName", u."username", r."model",
+               r."latencyMs", r."totalTokens",
+               ${effectiveInput} AS "inputTokens",
+               ${effectiveOutput} AS "outputTokens",
+               r."failed"
+        FROM "usage_records" r
+        LEFT JOIN "user_api_keys" k ON k."id" = r."apiKeyId"
+        LEFT JOIN "users" u ON u."id" = r."userId"
+        ${whereSql}
+        ORDER BY r."timestamp" DESC
+        LIMIT ${REQUEST_EVENT_LIMIT}
+      `),
+      prisma.$queryRaw<LatencySummaryRow[]>(Prisma.sql`
+        SELECT COUNT(*) FILTER (WHERE r."latencyMs" > 0) AS "sampleCount",
+               ROUND(AVG(r."latencyMs") FILTER (WHERE r."latencyMs" > 0)) AS "averageMs",
+               percentile_disc(0.95) WITHIN GROUP (ORDER BY r."latencyMs") FILTER (WHERE r."latencyMs" > 0) AS "p95Ms",
+               MAX(r."latencyMs") FILTER (WHERE r."latencyMs" > 0) AS "maxMs"
+        FROM "usage_records" r
+        ${whereSql}
+      `),
+      prisma.$queryRaw<EventRow[]>(Prisma.sql`
+        SELECT r."timestamp", r."authIndex", k."name" AS "keyName", u."username", r."model",
+               r."latencyMs", r."totalTokens",
+               ${effectiveInput} AS "inputTokens",
+               ${effectiveOutput} AS "outputTokens",
+               r."failed"
+        FROM "usage_records" r
+        LEFT JOIN "user_api_keys" k ON k."id" = r."apiKeyId"
+        LEFT JOIN "users" u ON u."id" = r."userId"
+        ${whereSql}
+          AND r."latencyMs" > 0
+        ORDER BY r."timestamp" DESC
+        LIMIT ${LATENCY_SERIES_LIMIT}
+      `),
+      prisma.collectorState.findUnique({ where: { id: "singleton" } }),
+    ]);
 
     const keyUsageMap: Record<string, KeyUsage> = {};
-    const dailyMap: Record<string, { requests: number; tokens: number; inputTokens: number; outputTokens: number; success: number; failure: number }> = {};
     const modelTotalsMap: Record<string, { requests: number; tokens: number }> = {};
-    const requestEvents: RequestEvent[] = [];
-    const latencySeriesSeed: LatencyPoint[] = [];
-    const latencyValues: number[] = [];
     let totalRequests = 0;
     let totalTokens = 0;
     let totalInputTokens = 0;
@@ -220,16 +309,15 @@ export async function GET(request: NextRequest) {
     let totalSuccessCount = 0;
     let totalFailureCount = 0;
 
-    for (const record of usageRecords) {
-      const groupKey = record.apiKeyId ?? record.userId ?? record.authIndex;
+    for (const record of aggregateRows) {
+      const groupKey = record.groupKey;
 
       if (!keyUsageMap[groupKey]) {
-        const keyName = record.apiKey?.name
-          ?? (record.user?.username ? record.user.username : `Key ${record.authIndex.slice(0, 6)}`);
+        const keyName = record.keyName ?? record.username ?? `Key ${groupKey.slice(0, 6)}`;
 
         keyUsageMap[groupKey] = {
           keyName,
-          ...(isAdmin && record.user?.username ? { username: record.user.username } : {}),
+          ...(isAdmin && record.username ? { username: record.username } : {}),
           ...(isAdmin && record.userId ? { userId: record.userId } : {}),
           totalRequests: 0,
           totalTokens: 0,
@@ -244,18 +332,19 @@ export async function GET(request: NextRequest) {
       }
 
       const keyUsage = keyUsageMap[groupKey];
-      const username = record.user?.username;
-      keyUsage.totalRequests += 1;
-      keyUsage.totalTokens += record.totalTokens;
-      keyUsage.inputTokens += record.inputTokens;
-      keyUsage.outputTokens += record.outputTokens;
-      keyUsage.reasoningTokens += record.reasoningTokens;
-      keyUsage.cachedTokens += record.cachedTokens;
+      const requests = dbNumber(record.requests);
+      const tokens = dbNumber(record.totalTokens);
+      keyUsage.totalRequests += requests;
+      keyUsage.totalTokens += tokens;
+      keyUsage.inputTokens += dbNumber(record.inputTokens);
+      keyUsage.outputTokens += dbNumber(record.outputTokens);
+      keyUsage.reasoningTokens += dbNumber(record.reasoningTokens);
+      keyUsage.cachedTokens += dbNumber(record.cachedTokens);
 
       if (record.failed) {
-        keyUsage.failureCount += 1;
+        keyUsage.failureCount += requests;
       } else {
-        keyUsage.successCount += 1;
+        keyUsage.successCount += requests;
       }
 
       const modelName = record.model;
@@ -265,88 +354,95 @@ export async function GET(request: NextRequest) {
           totalTokens: 0,
           inputTokens: 0,
           outputTokens: 0,
+          pricingBuckets: [],
         };
       }
-      keyUsage.models[modelName].totalRequests += 1;
-      keyUsage.models[modelName].totalTokens += record.totalTokens;
-      keyUsage.models[modelName].inputTokens += record.inputTokens;
-      keyUsage.models[modelName].outputTokens += record.outputTokens;
-
-      // Daily aggregation for charts (use server local timezone, not UTC)
-      const yr = record.timestamp.getFullYear();
-      const mo = String(record.timestamp.getMonth() + 1).padStart(2, "0");
-      const dy = String(record.timestamp.getDate()).padStart(2, "0");
-      const dayKey = `${yr}-${mo}-${dy}`;
-      if (!dailyMap[dayKey]) {
-        dailyMap[dayKey] = { requests: 0, tokens: 0, inputTokens: 0, outputTokens: 0, success: 0, failure: 0 };
+      keyUsage.models[modelName].totalRequests += requests;
+      keyUsage.models[modelName].totalTokens += tokens;
+      keyUsage.models[modelName].inputTokens += dbNumber(record.inputTokens);
+      keyUsage.models[modelName].outputTokens += dbNumber(record.outputTokens);
+      const pricingBuckets = keyUsage.models[modelName].pricingBuckets;
+      let pricingBucket = pricingBuckets.find((bucket) =>
+        bucket.longContext === record.longContext && bucket.serviceTier === record.serviceTier
+      );
+      if (!pricingBucket) {
+        pricingBucket = {
+          requests: 0,
+          inputTokens: 0,
+          uncachedInputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          outputTokens: 0,
+          longContext: record.longContext,
+          serviceTier: record.serviceTier,
+        };
+        pricingBuckets.push(pricingBucket);
       }
-      dailyMap[dayKey].requests += 1;
-      dailyMap[dayKey].tokens += record.totalTokens;
-      dailyMap[dayKey].inputTokens += record.inputTokens;
-      dailyMap[dayKey].outputTokens += record.outputTokens;
-      if (record.failed) {
-        dailyMap[dayKey].failure += 1;
-      } else {
-        dailyMap[dayKey].success += 1;
-      }
+      pricingBucket.requests += requests;
+      pricingBucket.inputTokens += dbNumber(record.inputTokens);
+      pricingBucket.uncachedInputTokens += dbNumber(record.uncachedInputTokens);
+      pricingBucket.cacheReadTokens += dbNumber(record.cachedTokens);
+      pricingBucket.cacheWriteTokens += dbNumber(record.cacheWriteTokens);
+      pricingBucket.outputTokens += dbNumber(record.outputTokens);
 
       // Model totals aggregation for charts
       if (!modelTotalsMap[modelName]) {
         modelTotalsMap[modelName] = { requests: 0, tokens: 0 };
       }
-      modelTotalsMap[modelName].requests += 1;
-      modelTotalsMap[modelName].tokens += record.totalTokens;
+      modelTotalsMap[modelName].requests += requests;
+      modelTotalsMap[modelName].tokens += tokens;
 
-      const event: RequestEvent = {
-        timestamp: record.timestamp.toISOString(),
-        keyName: keyUsage.keyName,
-        ...(isAdmin && username ? { username } : {}),
-        model: modelName,
-        latencyMs: Math.max(0, record.latencyMs),
-        totalTokens: record.totalTokens,
-        inputTokens: record.inputTokens,
-        outputTokens: record.outputTokens,
-        failed: record.failed,
-      };
-      if (requestEvents.length < REQUEST_EVENT_LIMIT) {
-        requestEvents.push(event);
-      }
-      if (event.latencyMs > 0) {
-        latencyValues.push(event.latencyMs);
-        if (latencySeriesSeed.length < LATENCY_SERIES_LIMIT) {
-          latencySeriesSeed.push({
-            timestamp: event.timestamp,
-            keyName: event.keyName,
-            ...(event.username ? { username: event.username } : {}),
-            model: event.model,
-            latencyMs: event.latencyMs,
-            failed: event.failed,
-          });
-        }
-      }
-
-      totalRequests += 1;
-      totalTokens += record.totalTokens;
-      totalInputTokens += record.inputTokens;
-      totalOutputTokens += record.outputTokens;
+      totalRequests += requests;
+      totalTokens += tokens;
+      totalInputTokens += dbNumber(record.inputTokens);
+      totalOutputTokens += dbNumber(record.outputTokens);
       if (record.failed) {
-        totalFailureCount += 1;
+        totalFailureCount += requests;
       } else {
-        totalSuccessCount += 1;
+        totalSuccessCount += requests;
       }
     }
 
-    // Build sorted daily breakdown array
-    const dailyBreakdown = Object.entries(dailyMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, data]) => ({ date, ...data }));
+    const dailyBreakdown = dailyRows.map((row) => ({
+      date: row.date,
+      requests: dbNumber(row.requests),
+      tokens: dbNumber(row.tokens),
+      inputTokens: dbNumber(row.inputTokens),
+      outputTokens: dbNumber(row.outputTokens),
+      success: dbNumber(row.success),
+      failure: dbNumber(row.failure),
+    }));
 
     // Build sorted model breakdown array (top models first)
     const modelBreakdown = Object.entries(modelTotalsMap)
       .sort(([, a], [, b]) => b.requests - a.requests)
       .map(([model, data]) => ({ model, ...data }));
-    const latencySummary = summarizeLatency(latencyValues);
-    const latencySeries = [...latencySeriesSeed].reverse();
+    const requestEvents: RequestEvent[] = eventRows.map((row) => ({
+      timestamp: row.timestamp.toISOString(),
+      keyName: row.keyName ?? `Key ${row.authIndex.slice(0, 6)}`,
+      ...(isAdmin && row.username ? { username: row.username } : {}),
+      model: row.model,
+      latencyMs: Math.max(0, row.latencyMs),
+      totalTokens: row.totalTokens,
+      inputTokens: row.inputTokens,
+      outputTokens: row.outputTokens,
+      failed: row.failed,
+    }));
+    const latencySeries: LatencyPoint[] = latencySeriesRows.map((row) => ({
+      timestamp: row.timestamp.toISOString(),
+      keyName: row.keyName ?? `Key ${row.authIndex.slice(0, 6)}`,
+      ...(isAdmin && row.username ? { username: row.username } : {}),
+      model: row.model,
+      latencyMs: Math.max(0, row.latencyMs),
+      failed: row.failed,
+    })).reverse();
+    const latencyRow = latencyRows[0];
+    const latencySummary: LatencySummary = {
+      sampleCount: dbNumber(latencyRow?.sampleCount),
+      averageMs: dbNumber(latencyRow?.averageMs),
+      p95Ms: dbNumber(latencyRow?.p95Ms),
+      maxMs: dbNumber(latencyRow?.maxMs),
+    };
 
     const responseData = {
       data: {
@@ -372,7 +468,7 @@ export async function GET(request: NextRequest) {
           lastCollectedAt: collectorState?.lastCollectedAt?.toISOString() ?? "",
           lastStatus: collectorState?.lastStatus ?? "unknown",
         },
-        truncated,
+        truncated: false,
       },
       isAdmin,
     };
@@ -384,8 +480,10 @@ export async function GET(request: NextRequest) {
         isAdmin,
         from: fromParam,
         to: toParam,
-        recordCount: usageRecords.length,
-        truncated,
+        recordCount: totalRequests,
+        aggregateRows: aggregateRows.length,
+        eventCount: requestEvents.length,
+        truncated: false,
         durationMs: Date.now() - requestStartedAt,
       },
       "Usage history request completed"

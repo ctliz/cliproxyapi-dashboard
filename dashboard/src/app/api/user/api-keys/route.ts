@@ -4,6 +4,7 @@ import { validateOrigin } from "@/lib/auth/origin";
 import { generateApiKey } from "@/lib/api-keys/generate";
 import { syncKeysToCliProxyApi } from "@/lib/api-keys/sync";
 import { syncTokenModelPolicyFile } from "@/lib/api-keys/policy-sync";
+import { syncApiKeyFastPolicyFile } from "@/lib/api-keys/fast-sync";
 import { prisma } from "@/lib/db";
 import { checkRateLimitWithPreset } from "@/lib/auth/rate-limit";
 import { logger } from "@/lib/logger";
@@ -17,6 +18,7 @@ export interface ApiKeyResponse {
   createdAt: string;
   lastUsedAt: string | null;
   policyEnabled: boolean;
+  fastEnabled: boolean;
   allowedModels: string[];
   fallbackProvider: string | null;
   fallbackModel: string | null;
@@ -25,6 +27,7 @@ export interface ApiKeyResponse {
 const CreateApiKeyRequestSchema = z.object({
   name: z.string().optional(),
   policyEnabled: z.boolean().optional(),
+  fastEnabled: z.boolean().optional(),
   allowedModels: z.array(z.string()).optional(),
   fallbackProvider: z.string().nullable().optional(),
   fallbackModel: z.string().nullable().optional(),
@@ -63,6 +66,7 @@ export async function GET() {
         createdAt: true,
         lastUsedAt: true,
         policyEnabled: true,
+        fastEnabled: true,
         allowedModels: true,
         fallbackProvider: true,
         fallbackModel: true,
@@ -76,6 +80,7 @@ export async function GET() {
       createdAt: apiKey.createdAt.toISOString(),
       lastUsedAt: apiKey.lastUsedAt?.toISOString() || null,
       policyEnabled: apiKey.policyEnabled,
+      fastEnabled: apiKey.fastEnabled,
       allowedModels: apiKey.allowedModels,
       fallbackProvider: apiKey.fallbackProvider,
       fallbackModel: apiKey.fallbackModel,
@@ -120,6 +125,7 @@ export async function POST(request: NextRequest) {
         key,
         name,
         policyEnabled: parsed.data.policyEnabled ?? false,
+        fastEnabled: parsed.data.fastEnabled ?? false,
         allowedModels: parsed.data.allowedModels ?? [],
         fallbackProvider: parsed.data.fallbackProvider ?? null,
         fallbackModel: parsed.data.fallbackModel ?? null,
@@ -134,11 +140,12 @@ export async function POST(request: NextRequest) {
       logger.error({ err }, "Background sync threw unexpected error after API key creation");
     });
 
-    if (apiKey.policyEnabled) {
-      syncTokenModelPolicyFile().catch((err) => {
-        logger.error({ err }, "Background policy sync failed after API key creation");
-      });
-    }
+    Promise.all([
+      apiKey.policyEnabled ? syncTokenModelPolicyFile() : Promise.resolve(null),
+      apiKey.fastEnabled ? syncApiKeyFastPolicyFile() : Promise.resolve(null),
+    ]).catch((err) => {
+      logger.error({ err }, "Background policy sync failed after API key creation");
+    });
 
     const response: CreateApiKeyResponse = {
       id: apiKey.id,
@@ -194,6 +201,10 @@ export async function DELETE(request: NextRequest) {
       syncKeysToCliProxyApi(),
       syncTokenModelPolicyFile().catch((err) => {
         logger.error({ err }, "Background policy sync failed after API key deletion");
+        return { ok: false, error: String(err), rulesCount: 0, filePath: "" };
+      }),
+      syncApiKeyFastPolicyFile().catch((err) => {
+        logger.error({ err }, "Background Fast policy sync failed after API key deletion");
         return { ok: false, error: String(err), rulesCount: 0, filePath: "" };
       }),
     ]);

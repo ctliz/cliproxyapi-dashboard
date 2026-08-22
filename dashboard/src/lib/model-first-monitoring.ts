@@ -9,6 +9,7 @@ export const MODEL_FIRST_SNAPSHOT_STALE_MS = 300_000;
 export const MODEL_FIRST_PROVIDERS = ["antigravity", "gemini-cli", "gemini"] as const;
 
 export type QuotaMonitorMode = "window-based" | "model-first";
+export type QuotaWindowType = "weekly" | "five-hour" | "provider";
 
 export interface QuotaModel {
   id: string;
@@ -36,7 +37,7 @@ export interface QuotaGroup {
   fullRecoveryAt?: string | null;
   bottleneckModel?: string | null;
   hasMixedResetTimes?: boolean;
-  windowType?: "weekly" | "five-hour" | "provider";
+  windowType?: QuotaWindowType;
 }
 
 export interface QuotaAccount {
@@ -84,8 +85,7 @@ export interface ModelFirstAccountSummary {
   nextWindowResetAt: string | null;
   fullWindowResetAt: string | null;
   nextRecoveryAt: string | null;
-  weeklyRemainingFraction: number | null;
-  fiveHourRemainingFraction: number | null;
+  providerRemainingFraction: number | null;
 }
 
 export interface ModelFirstProviderSummary {
@@ -120,7 +120,8 @@ export function isModelFirstProvider(provider: string | undefined | null): boole
 }
 
 export function isModelFirstAccount(account: Pick<QuotaAccount, "provider" | "monitorMode">): boolean {
-  return account.monitorMode === "model-first" || isModelFirstProvider(account.provider);
+  if (account.monitorMode) return account.monitorMode === "model-first";
+  return isModelFirstProvider(account.provider);
 }
 
 export function isStaleSnapshot(
@@ -253,8 +254,7 @@ export function summarizeModelFirstAccount(account: QuotaAccount): ModelFirstAcc
     nextWindowResetAt: pickIso(nextWindowResetTimes, "min"),
     fullWindowResetAt: pickIso(fullWindowResetTimes, "max"),
     nextRecoveryAt: pickIso(nextRecoveryTimes, "min"),
-    weeklyRemainingFraction: minFractions.length > 0 ? Math.min(...minFractions) : null,
-    fiveHourRemainingFraction: null,
+    providerRemainingFraction: minFractions.length > 0 ? Math.min(...minFractions) : null,
   };
 }
 

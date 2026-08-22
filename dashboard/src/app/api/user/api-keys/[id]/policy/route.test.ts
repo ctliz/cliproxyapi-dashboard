@@ -32,6 +32,11 @@ vi.mock("@/lib/api-keys/policy-sync", () => ({
   syncTokenModelPolicyFile: (...args: unknown[]) => syncPolicyMock(...args),
 }));
 
+const syncFastPolicyMock = vi.fn();
+vi.mock("@/lib/api-keys/fast-sync", () => ({
+  syncApiKeyFastPolicyFile: (...args: unknown[]) => syncFastPolicyMock(...args),
+}));
+
 function buildPutRequest(body: unknown): NextRequest {
   return new NextRequest("http://localhost/api/user/api-keys/key-123/policy", {
     method: "PUT",
@@ -44,14 +49,16 @@ describe("PUT /api/user/api-keys/[id]/policy", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     syncPolicyMock.mockResolvedValue({ ok: true, rulesCount: 1, filePath: "/path" });
+    syncFastPolicyMock.mockResolvedValue({ ok: true, rulesCount: 1, filePath: "/fast-path" });
   });
 
   it("updates policy and syncs file when valid input is provided", async () => {
-    findFirstMock.mockResolvedValue({ id: "key-123", userId: "user-1" });
+    findFirstMock.mockResolvedValue({ id: "key-123", userId: "user-1", fastEnabled: false });
     updateMock.mockResolvedValue({
       id: "key-123",
       name: "Default",
       policyEnabled: true,
+      fastEnabled: true,
       allowedModels: ["gpt-4o", "claude-*"],
       fallbackProvider: "antigravity",
       fallbackModel: "gemini-2.5-flash",
@@ -61,6 +68,7 @@ describe("PUT /api/user/api-keys/[id]/policy", () => {
     const res = await PUT(
       buildPutRequest({
         policyEnabled: true,
+        fastEnabled: true,
         allowedModels: ["gpt-4o", "claude-*"],
         fallbackProvider: "antigravity",
         fallbackModel: "gemini-2.5-flash",
@@ -72,8 +80,10 @@ describe("PUT /api/user/api-keys/[id]/policy", () => {
     const body = await res.json();
     expect(body.success).toBe(true);
     expect(body.apiKey.policyEnabled).toBe(true);
+    expect(body.apiKey.fastEnabled).toBe(true);
     expect(body.apiKey.allowedModels).toEqual(["gpt-4o", "claude-*"]);
     expect(syncPolicyMock).toHaveBeenCalledTimes(1);
+    expect(syncFastPolicyMock).toHaveBeenCalledTimes(1);
   });
 
   it("returns 404 if API key does not belong to session user", async () => {

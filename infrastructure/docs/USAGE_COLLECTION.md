@@ -6,7 +6,18 @@
 
 CLIProxyAPI Dashboard includes an **automated usage collection system** that tracks API requests, token usage, and model statistics from CLIProxyAPI and stores them in PostgreSQL for historical analysis.
 
-> **Key Point**: Usage data is collected every 5 minutes by a dedicated cron service and displayed in the Dashboard's Usage page.
+> **Key Point**: Usage data is collected every minute by a dedicated cron service and displayed in the Dashboard's Usage page.
+
+## Model Usage API
+
+`GET /v1/usage` returns persisted usage grouped by model. It accepts an authenticated Dashboard session or a Dashboard-generated API key:
+
+```bash
+curl -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8317/v1/usage?from=2026-08-20&to=2026-08-20"
+```
+
+The `from` and `to` parameters are optional and accept `YYYY-MM-DD` or ISO 8601 timestamps. Any valid CPA API key can read the complete model usage summary through the CPA route facade on port `8317`. The Dashboard also serves the authenticated route directly on port `3000`.
 
 ## Architecture
 
@@ -40,7 +51,7 @@ usage-collector:
   command: >
     sh -c "
       apk add --no-cache curl dcron &&
-      echo '*/5 * * * * curl -sf -X POST http://dashboard:3000/api/usage/collect -H \"Authorization: Bearer $$COLLECTOR_API_KEY\" > /dev/null 2>&1' > /tmp/crontab &&
+      echo '* * * * * curl -sf -X POST http://dashboard:3000/api/usage/collect -H \"Authorization: Bearer $$COLLECTOR_API_KEY\" > /dev/null 2>&1' > /tmp/crontab &&
       crontab /tmp/crontab &&
       crond -f -d 8
     "
@@ -48,7 +59,7 @@ usage-collector:
 
 **What it does:**
 - Installs curl and dcron (lightweight cron daemon)
-- Creates crontab entry to call `/api/usage/collect` every 5 minutes
+- Creates crontab entry to call `/api/usage/collect` every minute
 - Uses `COLLECTOR_API_KEY` for authentication
 - Runs in foreground with debug logging
 
@@ -335,7 +346,7 @@ The default 5-minute interval balances:
 To change frequency, modify the cron schedule in docker-compose.yml:
 
 ```yaml
-# Change from */5 * * * * to */1 * * * * for 1-minute collection
+# The default schedule is already every minute: * * * * *
 echo '*/1 * * * * curl -sf -X POST http://dashboard:3000/api/usage/collect ...' > /tmp/crontab
 ```
 

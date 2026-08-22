@@ -214,37 +214,44 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
     expect(account.groups).toBeDefined();
   });
 
-  it("falls back to the next Antigravity quota endpoint and returns model-first metadata", async () => {
+  it("uses the Antigravity quota summary for explicit weekly and five-hour windows", async () => {
     const authFilesResponse = {
       files: [
         {
           auth_index: 0,
           provider: "antigravity",
           email: "test@gmail.com",
+          project_id: "test-project",
           disabled: false,
           status: "active",
         },
       ],
     };
 
-    const googleModelsResponse = {
+    const quotaSummaryResponse = {
       status_code: 200,
       body: {
-        models: {
-          "gemini-2.5-flash": {
-            quotaInfo: {
-              remainingFraction: 0.8,
-              resetTime: "2026-03-08T05:00:00Z",
-            },
+        groups: [
+          {
+            displayName: "Gemini Models",
+            buckets: [
+              {
+                bucketId: "gemini-weekly",
+                displayName: "Weekly Limit Remaining",
+                window: "weekly",
+                remainingFraction: 0.32,
+                resetTime: "2026-03-12T00:00:00Z",
+              },
+              {
+                bucketId: "gemini-5h",
+                displayName: "Five Hour Limit Remaining",
+                window: "5h",
+                remainingFraction: 0.8,
+                resetTime: "2026-03-08T05:00:00Z",
+              },
+            ],
           },
-          "gemini-3-pro-high": {
-            displayName: "Gemini 3 Pro High",
-            quotaInfo: {
-              remainingFraction: 0.4,
-              resetTime: "2026-03-12T00:00:00Z",
-            },
-          },
-        },
+        ],
       },
     };
 
@@ -256,27 +263,7 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
       })
       .mockResolvedValueOnce({
         ok: true,
-        json: () =>
-          Promise.resolve({
-            status_code: 200,
-            body: {
-              cloudaicompanionProject: "test-project",
-            },
-          }),
-        body: { cancel: vi.fn() },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            status_code: 429,
-            body: {},
-          }),
-        body: { cancel: vi.fn() },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(googleModelsResponse),
+        json: () => Promise.resolve(quotaSummaryResponse),
         body: { cancel: vi.fn() },
       });
 
@@ -288,23 +275,26 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
     const response = await GET(request as NextRequest);
     const data = await response.json();
 
-    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(data.accounts).toHaveLength(1);
     expect(data.generatedAt).toBeDefined();
 
     const account = data.accounts[0];
     expect(account.provider).toBe("antigravity");
-    expect(account.monitorMode).toBe("model-first");
+    expect(account.monitorMode).toBe("window-based");
     expect(account.snapshotFetchedAt).toBeDefined();
-    expect(account.snapshotSource).toContain("daily-cloudcode-pa.googleapis.com");
-    expect(account.groups[0].monitorMode).toBe("model-first");
-    expect(account.groups[0].nextWindowResetAt).toBeDefined();
-    expect(account.groups[0].p50RemainingFraction).toBeDefined();
-    expect(account.groups[0].models[0].displayName).toBe("Gemini 3 Pro High");
-    expect(account.groups[1].models[0].displayName).toBe("gemini-2.5-flash");
+    expect(account.snapshotSource).toContain("retrieveUserQuotaSummary");
+    expect(account.groups).toEqual([
+      expect.objectContaining({ id: "gemini-weekly", windowType: "weekly", remainingFraction: 0.32 }),
+      expect.objectContaining({ id: "gemini-5h", windowType: "five-hour", remainingFraction: 0.8 }),
+    ]);
+
+    const fetchQuotaCallBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(fetchQuotaCallBody.url).toContain("retrieveUserQuotaSummary");
+    expect(fetchQuotaCallBody.data).toBe("{\"project\":\"test-project\"}");
   });
 
-  it("passes project_id to fetchAvailableModels and treats missing remainingFraction as depleted", async () => {
+  it("falls back to fetchAvailableModels and treats missing remainingFraction as depleted", async () => {
     const authFilesResponse = {
       files: [
         {
@@ -332,6 +322,21 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
               cloudaicompanionProject: "confident-arc-98xjk",
             },
           }),
+        body: { cancel: vi.fn() },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ status_code: 404, body: {} }),
+        body: { cancel: vi.fn() },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ status_code: 404, body: {} }),
+        body: { cancel: vi.fn() },
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ status_code: 404, body: {} }),
         body: { cancel: vi.fn() },
       })
       .mockResolvedValueOnce({
@@ -368,11 +373,11 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
     const response = await GET(request as NextRequest);
     const data = await response.json();
 
-    expect(fetchMock).toHaveBeenCalledTimes(3);
-    expect(fetchMock.mock.calls[2]?.[1]).toMatchObject({
+    expect(fetchMock).toHaveBeenCalledTimes(6);
+    expect(fetchMock.mock.calls[5]?.[1]).toMatchObject({
       method: "POST",
     });
-    const fetchQuotaCallBody = JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body));
+    const fetchQuotaCallBody = JSON.parse(String(fetchMock.mock.calls[5]?.[1]?.body));
     expect(fetchQuotaCallBody.data).toBe("{\"project\":\"confident-arc-98xjk\"}");
 
     const account = data.accounts[0];
@@ -382,6 +387,7 @@ describe("GET /api/quota - Gemini CLI support (issue #125)", () => {
 
     expect(claudeModel?.remainingFraction).toBe(0);
     expect(flashModel?.remainingFraction).toBe(0.8);
+    expect(account.monitorMode).toBe("model-first");
   });
 });
 

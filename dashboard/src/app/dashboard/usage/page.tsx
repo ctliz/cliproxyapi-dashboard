@@ -35,6 +35,16 @@ interface KeyUsage {
     totalTokens: number;
     inputTokens: number;
     outputTokens: number;
+    pricingBuckets: Array<{
+      requests: number;
+      inputTokens: number;
+      uncachedInputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+      outputTokens: number;
+      longContext: boolean;
+      serviceTier: string;
+    }>;
   }>;
 }
 

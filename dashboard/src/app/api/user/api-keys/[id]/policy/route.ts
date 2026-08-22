@@ -3,12 +3,14 @@ import { verifySession } from "@/lib/auth/session";
 import { validateOrigin } from "@/lib/auth/origin";
 import { prisma } from "@/lib/db";
 import { syncTokenModelPolicyFile } from "@/lib/api-keys/policy-sync";
+import { syncApiKeyFastPolicyFile } from "@/lib/api-keys/fast-sync";
 import { logger } from "@/lib/logger";
 import { z } from "zod";
 import { Errors, apiSuccess } from "@/lib/errors";
 
 const UpdatePolicySchema = z.object({
   policyEnabled: z.boolean(),
+  fastEnabled: z.boolean().optional(),
   allowedModels: z.array(z.string().trim().min(1)).default([]),
   fallbackProvider: z.string().trim().nullable().optional(),
   fallbackModel: z.string().trim().nullable().optional(),
@@ -34,6 +36,7 @@ export async function GET(
         id: true,
         name: true,
         policyEnabled: true,
+        fastEnabled: true,
         allowedModels: true,
         fallbackProvider: true,
         fallbackModel: true,
@@ -78,7 +81,7 @@ export async function PUT(
         id,
         userId: session.userId,
       },
-      select: { id: true },
+      select: { id: true, fastEnabled: true },
     });
 
     if (!existingKey) {
@@ -92,6 +95,7 @@ export async function PUT(
       where: { id },
       data: {
         policyEnabled: parsed.data.policyEnabled,
+        fastEnabled: parsed.data.fastEnabled ?? existingKey.fastEnabled,
         allowedModels: parsed.data.allowedModels,
         fallbackProvider,
         fallbackModel,
@@ -100,22 +104,30 @@ export async function PUT(
         id: true,
         name: true,
         policyEnabled: true,
+        fastEnabled: true,
         allowedModels: true,
         fallbackProvider: true,
         fallbackModel: true,
       },
     });
 
-    const syncResult = await syncTokenModelPolicyFile();
-    if (!syncResult.ok) {
-      logger.error({ error: syncResult.error }, "Failed to write token-model-policy file after update");
+    const [modelPolicySync, fastPolicySync] = await Promise.all([
+      syncTokenModelPolicyFile(),
+      syncApiKeyFastPolicyFile(),
+    ]);
+    if (!modelPolicySync.ok) {
+      logger.error({ error: modelPolicySync.error }, "Failed to write token-model-policy file after update");
+    }
+    if (!fastPolicySync.ok) {
+      logger.error({ error: fastPolicySync.error }, "Failed to write API key Fast policy after update");
     }
 
     return apiSuccess({
       apiKey: updated,
       policySync: {
-        ok: syncResult.ok,
-        rulesCount: syncResult.ok ? syncResult.rulesCount : (syncResult.rulesCount ?? 0),
+        ok: modelPolicySync.ok && fastPolicySync.ok,
+        rulesCount: modelPolicySync.rulesCount,
+        fastRulesCount: fastPolicySync.rulesCount,
       },
     });
   } catch (error) {

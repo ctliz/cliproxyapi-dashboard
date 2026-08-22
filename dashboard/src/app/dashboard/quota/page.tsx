@@ -22,7 +22,7 @@ import {
   type QuotaMonitorMode,
   type QuotaResponse,
 } from "@/lib/model-first-monitoring";
-import { formatRelativeTime } from "@/lib/format-relative-time";
+import { averageQuotaCapacity } from "@/lib/quota-capacity";
 import { maskEmail } from "@/lib/mask-email";
 import {
   buildQuotaSearch,
@@ -171,8 +171,8 @@ function calcProviderSummary(accounts: QuotaAccount[]): ProviderSummary {
       continue;
     }
 
-    const exhaustedProduct = scores.reduce((product, score) => product * (1 - score), 1);
-    const capacity = 1 - exhaustedProduct;
+    const capacity = averageQuotaCapacity(scores);
+    if (capacity === null) continue;
 
     let earliestReset: string | null = null;
     let minResetTime = Infinity;
@@ -449,7 +449,7 @@ export default function QuotaPage() {
                 </div>
                 <div className="rounded-lg border border-[var(--surface-border)] bg-[var(--surface-base)] px-2.5 py-2">
                   <p className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">
-                    {t("weeklyLabel")} <HelpTooltip content={t("weeklyTooltip")} />
+                    {t("modelQuotaLabel")} <HelpTooltip content={t("modelQuotaTooltip")} />
                   </p>
                   <p className="mt-0.5 text-xs font-semibold text-[var(--text-primary)]">
                     {modelFirstSummary.minRemainingFraction === null

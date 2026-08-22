@@ -1,0 +1,16 @@
+ALTER TABLE "usage_records"
+  ADD COLUMN IF NOT EXISTS "provider" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "executorType" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "requestId" TEXT,
+  ADD COLUMN IF NOT EXISTS "accountingVersion" INTEGER NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS "accountingQuality" TEXT NOT NULL DEFAULT 'legacy',
+  ADD COLUMN IF NOT EXISTS "inputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "uncachedInputTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "cacheReadTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "cacheWriteTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "outputTotalTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "nonReasoningOutputTokens" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS "unclassifiedTokens" INTEGER NOT NULL DEFAULT 0;
+
+CREATE INDEX IF NOT EXISTS "usage_records_requestId_idx" ON "usage_records"("requestId");
+CREATE INDEX IF NOT EXISTS "usage_records_accountingVersion_idx" ON "usage_records"("accountingVersion");

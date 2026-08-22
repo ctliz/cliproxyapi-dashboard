@@ -134,7 +134,7 @@ export function QuotaDetails({
                   <span>{t("accountColumn")}</span>
                   <span>{t("providerColumn")}</span>
                   <span>{t("statusColumn")}</span>
-                  <span>{section.modelFirstView ? t("weeklyLabel") : t("longTermLabel")}</span>
+                  <span>{section.modelFirstView ? t("modelQuotaLabel") : t("longTermLabel")}</span>
                   <span>{section.modelFirstView ? t("resetColumnLabel") : t("shortTermLabel")}</span>
                 </div>
 
@@ -207,9 +207,9 @@ export function QuotaDetails({
                         {section.modelFirstView ? (
                           <>
                             <span className="text-xs text-[var(--text-secondary)]">
-                              {accountSummary?.weeklyRemainingFraction === null || !accountSummary
+                              {accountSummary?.providerRemainingFraction === null || !accountSummary
                                 ? "-"
-                                : `${Math.round(accountSummary.weeklyRemainingFraction * 100)}%`}
+                                : `${Math.round(accountSummary.providerRemainingFraction * 100)}%`}
                             </span>
                             <span className="text-xs text-[var(--text-muted)]">
                               {accountSummary
@@ -260,8 +260,7 @@ export function QuotaDetails({
                             <div className="mb-2 flex flex-wrap gap-3 text-[11px] text-[var(--text-muted)]">
                               <span>{t("snapshotStatusLabel")}: {accountSummary.staleSnapshot ? t("staleLabel") : t("freshLabel")}</span>
                               <span>{t("confidenceLabel")}: {accountQuotaUnverified ? t("snapshotOnlyLabel") : t("groupedReadyLabel")}</span>
-                              <span>{t("weeklyLabel")}: {accountSummary.weeklyRemainingFraction === null ? "-" : `${Math.round(accountSummary.weeklyRemainingFraction * 100)}%`}</span>
-                              <span>{t("fiveHourLabel")}: {t("notProvidedLabel")}</span>
+                              <span>{t("modelQuotaLabel")}: {accountSummary.providerRemainingFraction === null ? "-" : `${Math.round(accountSummary.providerRemainingFraction * 100)}%`}</span>
                               <span>{t("readyGroupsLabel")}: {accountSummary.readyGroups}</span>
                             </div>
                           )}

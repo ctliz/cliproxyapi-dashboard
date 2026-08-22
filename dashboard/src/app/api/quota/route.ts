@@ -9,12 +9,17 @@ import {
   isModelFirstProvider,
   type QuotaAccount,
   type QuotaGroup,
+  type QuotaMonitorMode,
   type QuotaResponse,
 } from "@/lib/model-first-monitoring";
 import {
   groupAntigravityModels,
   type AntigravityModel,
 } from "@/lib/antigravity-model-grouping";
+import {
+  ANTIGRAVITY_QUOTA_SUMMARY_ENDPOINTS,
+  parseAntigravityQuotaSummary,
+} from "@/lib/antigravity-quota-summary";
 
 const CLIPROXYAPI_MANAGEMENT_URL =
   process.env.CLIPROXYAPI_MANAGEMENT_URL ||
@@ -30,6 +35,8 @@ interface AuthFile {
   email?: string;
   name?: string;
   label?: string;
+  project_id?: string;
+  projectId?: string;
   disabled: boolean;
   status: string;
 }
@@ -112,6 +119,7 @@ interface AntigravityLoadCodeAssistResponse {
 
 interface AntigravityQuotaSnapshot {
   groups: QuotaGroup[];
+  monitorMode: QuotaMonitorMode;
   snapshotFetchedAt: string;
   snapshotSource: string;
 }
@@ -197,7 +205,7 @@ function xaiBillingGroup(
     remainingFraction: usagePercent === null ? null : Math.max(0, 1 - usagePercent / 100),
     resetTime: end,
     models: [],
-    windowType: "provider",
+    windowType: kind === "weekly" ? "weekly" : "provider",
   };
 }
 
@@ -322,87 +330,139 @@ async function fetchAntigravityProjectId(authIndex: string): Promise<string | nu
   }
 }
 
+async function callAntigravityQuotaEndpoint(
+  authIndex: string,
+  endpoint: string,
+  payload: string
+): Promise<{ statusCode: number; payload: unknown }> {
+  const response = await fetch(`${CLIPROXYAPI_MANAGEMENT_URL}/api-call`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${MANAGEMENT_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(30_000),
+    body: JSON.stringify({
+      auth_index: authIndex,
+      method: "POST",
+      url: endpoint,
+      header: {
+        Authorization: "Bearer $TOKEN$",
+        "Content-Type": "application/json",
+        "User-Agent": "antigravity/cli/1.11.5 (antigravity; os_type=DARWIN; arch=ARM64)",
+      },
+      data: payload,
+    }),
+  });
+
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`API call failed: ${response.status}`);
+  }
+
+  const result = (await response.json()) as ApiCallResponse | AntigravityResponse;
+  if (!("status_code" in result || "statusCode" in result)) {
+    return { statusCode: 200, payload: result };
+  }
+
+  let parsedPayload = result.body;
+  if (typeof parsedPayload === "string") {
+    try {
+      parsedPayload = JSON.parse(parsedPayload);
+    } catch {
+      // Preserve text so callers can report an invalid payload or provider error.
+    }
+  }
+
+  return {
+    statusCode: Number(result.status_code ?? result.statusCode ?? 0),
+    payload: parsedPayload,
+  };
+}
+
+function antigravityErrorDetail(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "";
+  const error = (payload as { error?: unknown }).error;
+  if (!error || typeof error !== "object") return "";
+  const typedError = error as { message?: unknown; status?: unknown };
+  return typeof typedError.message === "string"
+    ? typedError.message
+    : typeof typedError.status === "string"
+      ? typedError.status
+      : "";
+}
+
 async function fetchAntigravityQuota(
-  authIndex: string
+  authIndex: string,
+  knownProjectId?: string,
+  preferQuotaSummary = true
 ): Promise<AntigravityQuotaSnapshot | { error: string }> {
-  const projectId = await fetchAntigravityProjectId(authIndex);
+  const projectId = knownProjectId?.trim() || await fetchAntigravityProjectId(authIndex);
   const payload = JSON.stringify(projectId ? { project: projectId } : {});
   let lastError = "No Antigravity quota endpoints responded";
 
+  if (preferQuotaSummary && projectId) {
+    for (const endpoint of ANTIGRAVITY_QUOTA_SUMMARY_ENDPOINTS) {
+      try {
+        const result = await callAntigravityQuotaEndpoint(authIndex, endpoint, payload);
+        if (result.statusCode >= 200 && result.statusCode < 300) {
+          const groups = parseAntigravityQuotaSummary(result.payload);
+          if (groups) {
+            return {
+              groups,
+              monitorMode: "window-based",
+              snapshotFetchedAt: new Date().toISOString(),
+              snapshotSource: endpoint,
+            };
+          }
+          lastError = "Invalid Antigravity quota summary payload";
+          continue;
+        }
+
+        const errorDetail = antigravityErrorDetail(result.payload);
+        if (
+          result.statusCode === 403 &&
+          (errorDetail.toLowerCase().includes("validation_required") ||
+            errorDetail.toLowerCase().includes("verify"))
+        ) {
+          return { error: "Google account requires verification - visit accounts.google.com" };
+        }
+        lastError = `Antigravity quota summary error: ${result.statusCode}${errorDetail ? ` - ${errorDetail}` : ""}`;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : "Unknown error";
+      }
+    }
+  }
+
   for (const endpoint of ANTIGRAVITY_QUOTA_ENDPOINTS) {
     try {
-      const response = await fetch(`${CLIPROXYAPI_MANAGEMENT_URL}/api-call`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${MANAGEMENT_API_KEY}`,
-          "Content-Type": "application/json",
-        },
-        signal: AbortSignal.timeout(30_000),
-        body: JSON.stringify({
-          auth_index: authIndex,
-          method: "POST",
-          url: endpoint,
-          header: {
-            Authorization: "Bearer $TOKEN$",
-            "Content-Type": "application/json",
-            "User-Agent": "antigravity/1.11.5 windows/amd64",
-          },
-          data: payload,
-        }),
-      });
-
-      if (!response.ok) {
-        await response.body?.cancel();
-        lastError = `API call failed: ${response.status}`;
-        continue;
-      }
-
-      const apiCallResult = (await response.json()) as ApiCallResponse | AntigravityResponse;
-      let parsedPayload: unknown = apiCallResult;
-
-      if ("status_code" in apiCallResult || "statusCode" in apiCallResult) {
-        const statusCode = Number(apiCallResult.status_code ?? apiCallResult.statusCode ?? 0);
-        if (statusCode < 200 || statusCode >= 300) {
-          // Parse error body for more context
-          let errorDetail = "";
-          if (typeof apiCallResult.body === "string") {
-            try {
-              const errBody = JSON.parse(apiCallResult.body);
-              errorDetail = errBody?.error?.message || errBody?.error?.status || "";
-            } catch { /* ignore */ }
+      const result = await callAntigravityQuotaEndpoint(authIndex, endpoint, payload);
+      if (result.statusCode < 200 || result.statusCode >= 300) {
+        const errorDetail = antigravityErrorDetail(result.payload);
+        const statusCode = result.statusCode;
+        if (statusCode === 403) {
+          if (
+            errorDetail.toLowerCase().includes("validation_required") ||
+            errorDetail.toLowerCase().includes("verify")
+          ) {
+            return { error: "Google account requires verification - visit accounts.google.com" };
           }
-          
-          if (statusCode === 403) {
-            if (errorDetail.toLowerCase().includes("validation_required") || errorDetail.toLowerCase().includes("verify")) {
-              return { error: "Google account requires verification - visit accounts.google.com" };
-            }
-            lastError = `Antigravity access denied${errorDetail ? `: ${errorDetail}` : ""}`;
-            return { error: lastError };
-          }
-          if (statusCode === 429) {
-            lastError = `Antigravity rate limited${errorDetail ? `: ${errorDetail}` : " - quota exhausted"}`;
-            continue; // Try next endpoint
-          }
-          if (statusCode >= 500) {
-            lastError = `Antigravity server error: ${statusCode}`;
-            continue; // Try next endpoint
-          }
-          lastError = `Antigravity API error: ${statusCode}${errorDetail ? ` - ${errorDetail}` : ""}`;
+          lastError = `Antigravity access denied${errorDetail ? `: ${errorDetail}` : ""}`;
           return { error: lastError };
         }
-
-        parsedPayload = apiCallResult.body;
-        if (typeof parsedPayload === "string") {
-          try {
-            parsedPayload = JSON.parse(parsedPayload);
-          } catch {
-            lastError = "Invalid provider response body";
-            continue;
-          }
+        if (statusCode === 429) {
+          lastError = `Antigravity rate limited${errorDetail ? `: ${errorDetail}` : " - quota exhausted"}`;
+          continue;
         }
+        if (statusCode >= 500) {
+          lastError = `Antigravity server error: ${statusCode}`;
+          continue;
+        }
+        lastError = `Antigravity API error: ${statusCode}${errorDetail ? ` - ${errorDetail}` : ""}`;
+        return { error: lastError };
       }
 
-      const models = parseAntigravityPayload(parsedPayload);
+      const models = parseAntigravityPayload(result.payload);
       if (!models) {
         lastError = "Invalid Antigravity quota payload";
         continue;
@@ -411,6 +471,7 @@ async function fetchAntigravityQuota(
       const snapshotFetchedAt = new Date().toISOString();
       return {
         groups: groupAntigravityModels(models),
+        monitorMode: "model-first",
         snapshotFetchedAt,
         snapshotSource: endpoint,
       };
@@ -466,6 +527,14 @@ function parseCodexQuota(data: CodexWhamUsageResponse): QuotaGroup[] {
       label,
       remainingFraction,
       resetTime,
+      windowType:
+        typeof window.limit_window_seconds === "number" && window.limit_window_seconds <= 24 * 60 * 60
+          ? "five-hour"
+          : typeof window.limit_window_seconds === "number"
+            ? "weekly"
+            : key === "primary"
+              ? "five-hour"
+              : "weekly",
       models: [
         {
           id: `${key}-window`,
@@ -679,6 +748,7 @@ async function fetchKimiQuota(
         label: `Weekly Quota (${used}/${limit})`,
         remainingFraction,
         resetTime,
+        windowType: "weekly",
         models: [
           {
             id: "kimi-weekly",
@@ -712,6 +782,11 @@ async function fetchKimiQuota(
           label: displayLabel,
           remainingFraction,
           resetTime,
+          windowType:
+            (timeUnit.includes("MINUTE") && duration <= 24 * 60) ||
+            (timeUnit.includes("HOUR") && duration <= 24)
+              ? "five-hour"
+              : "provider",
           models: [
             {
               id,
@@ -855,6 +930,7 @@ async function fetchCopilotQuota(
         label,
         remainingFraction,
         resetTime,
+        windowType: "provider",
         models: [
           {
             id: "premium-requests",
@@ -988,7 +1064,8 @@ async function fetchClaudeQuota(
         const pushUsageGroup = (
           id: string,
           label: string,
-          window: ClaudeUsageWindow | undefined
+          window: ClaudeUsageWindow | undefined,
+          windowType: "weekly" | "five-hour"
         ) => {
           if (window?.utilization === undefined || window.utilization === null) {
             return;
@@ -1004,6 +1081,7 @@ async function fetchClaudeQuota(
             label,
             remainingFraction,
             resetTime: window.resets_at ?? null,
+            windowType,
             models: [
               {
                 id,
@@ -1015,10 +1093,10 @@ async function fetchClaudeQuota(
           });
         };
 
-        pushUsageGroup("five-hour", "5h Session", usageData.five_hour);
-        pushUsageGroup("seven-day", "7d Weekly", usageData.seven_day);
-        pushUsageGroup("seven-day-sonnet", "7d Sonnet", usageData.seven_day_sonnet);
-        pushUsageGroup("seven-day-opus", "7d Opus", usageData.seven_day_opus);
+        pushUsageGroup("five-hour", "5h Session", usageData.five_hour, "five-hour");
+        pushUsageGroup("seven-day", "7d Weekly", usageData.seven_day, "weekly");
+        pushUsageGroup("seven-day-sonnet", "7d Sonnet", usageData.seven_day_sonnet, "weekly");
+        pushUsageGroup("seven-day-opus", "7d Opus", usageData.seven_day_opus, "weekly");
 
         if (
           usageData.extra_usage?.is_enabled &&
@@ -1351,7 +1429,11 @@ export async function GET(request: NextRequest) {
       }
 
       if (isModelFirstProvider(providerNorm)) {
-        const result = await fetchAntigravityQuota(authIndex);
+        const result = await fetchAntigravityQuota(
+          authIndex,
+          account.project_id ?? account.projectId,
+          providerNorm === "antigravity"
+        );
         
         if ("error" in result) {
           return {
@@ -1368,7 +1450,7 @@ export async function GET(request: NextRequest) {
           provider: providerForResponse,
           email: displayEmail,
           supported: true,
-          monitorMode: "model-first",
+          monitorMode: result.monitorMode,
           snapshotFetchedAt: result.snapshotFetchedAt,
           snapshotSource: result.snapshotSource,
           groups: result.groups,

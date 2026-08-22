@@ -1,0 +1,3 @@
+ALTER TABLE "usage_records"
+  ADD COLUMN IF NOT EXISTS "serviceTier" TEXT NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS "responseServiceTier" TEXT NOT NULL DEFAULT '';

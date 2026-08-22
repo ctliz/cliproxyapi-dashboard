@@ -15,6 +15,7 @@ export interface ApiKeyItem {
   createdAt: string;
   lastUsedAt: string | null;
   policyEnabled: boolean;
+  fastEnabled: boolean;
   allowedModels: string[];
   fallbackProvider: string | null;
   fallbackModel: string | null;
@@ -33,6 +34,7 @@ interface ApiKeyPolicyModalProps {
   onSaved: (updated: {
     id: string;
     policyEnabled: boolean;
+    fastEnabled: boolean;
     allowedModels: string[];
     fallbackProvider: string | null;
     fallbackModel: string | null;
@@ -94,6 +96,7 @@ export function ApiKeyPolicyModal({
   const { showToast } = useToast();
 
   const [policyEnabled, setPolicyEnabled] = useState(false);
+  const [fastEnabled, setFastEnabled] = useState(false);
   const [allowedModels, setAllowedModels] = useState<string[]>([]);
   const [fallbackProvider, setFallbackProvider] = useState("");
   const [fallbackModel, setFallbackModel] = useState("");
@@ -131,6 +134,7 @@ export function ApiKeyPolicyModal({
   useEffect(() => {
     if (apiKey && isOpen) {
       setPolicyEnabled(Boolean(apiKey.policyEnabled));
+      setFastEnabled(Boolean(apiKey.fastEnabled));
       setAllowedModels(Array.isArray(apiKey.allowedModels) ? [...apiKey.allowedModels] : []);
       setFallbackProvider(apiKey.fallbackProvider || "");
       setFallbackModel(apiKey.fallbackModel || "");
@@ -228,6 +232,7 @@ export function ApiKeyPolicyModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           policyEnabled,
+          fastEnabled,
           allowedModels,
           fallbackProvider: fallbackProvider.trim() || null,
           fallbackModel: fallbackModel.trim() || null,
@@ -244,6 +249,7 @@ export function ApiKeyPolicyModal({
       onSaved({
         id: apiKey.id,
         policyEnabled,
+        fastEnabled,
         allowedModels,
         fallbackProvider: fallbackProvider.trim() || null,
         fallbackModel: fallbackModel.trim() || null,
@@ -296,6 +302,30 @@ export function ApiKeyPolicyModal({
 
       <ModalContent>
         <div className="space-y-5">
+          <div className="flex items-center justify-between rounded-lg border border-[var(--surface-border)] bg-[var(--surface-muted)]/60 p-3.5">
+            <div className="space-y-0.5 pr-4">
+              <label
+                htmlFor="fast-enable-toggle"
+                className="text-sm font-medium text-[var(--text-primary)] cursor-pointer"
+              >
+                {t("fastEnableLabel")}
+              </label>
+              <p className="text-xs text-[var(--text-muted)]">
+                {t("fastEnableDescription", { name: apiKey.name })}
+              </p>
+            </div>
+            <label className="relative inline-flex cursor-pointer items-center">
+              <input
+                id="fast-enable-toggle"
+                type="checkbox"
+                checked={fastEnabled}
+                onChange={(e) => setFastEnabled(e.target.checked)}
+                className="peer sr-only"
+              />
+              <div className="peer h-6 w-11 rounded-full bg-neutral-300 dark:bg-neutral-700 after:absolute after:top-[2px] after:start-[2px] after:h-5 after:w-5 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-all after:content-[''] peer-checked:bg-sky-600 peer-checked:after:translate-x-full peer-checked:after:border-white peer-focus:outline-none" />
+            </label>
+          </div>
+
           {/* Policy Toggle Card */}
           <div className="flex items-center justify-between rounded-xl border border-[var(--surface-border)] bg-[var(--surface-muted)]/60 p-3.5">
             <div className="space-y-0.5 pr-4">
